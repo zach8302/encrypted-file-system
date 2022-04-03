@@ -101,7 +101,11 @@ func someUsefulThings() {
 // (e.g. like the Username attribute) and methods (e.g. like the StoreFile method below).
 type User struct {
 	Username string
-
+	InviteKeys map[string]string
+	Salts map[string]string
+	EncKeys map[string]string
+	Stored map[string]string
+	PasswordHash, UserMAC, KeyUUID string
 	// You can add other attributes here if you want! But note that in order for attributes to
 	// be included when this struct is serialized to/from JSON, they must be capitalized.
 	// On the flipside, if you have an attribute that you want to be able to access from
@@ -110,12 +114,52 @@ type User struct {
 	// begins with a lowercase letter).
 }
 
+type TreeNode struct {
+
+}
+
+type File struct {
+	IsFile bool
+	OwnerKeys map[string]string
+	SharedKeys map[string]string
+	Filename, Contents, MAC, ShareTree string
+}
+
 // NOTE: The following methods have toy (insecure!) implementations.
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
 	userdata.Username = username
 	return &userdata, nil
+}
+
+func generateUserSalts(salts *map[string]string) {
+	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "UserMAC"}
+	set := make(map[string]bool)
+	for _, val := range names {
+		salt := RandomBytes(8)
+		for set[x] != true {
+			salt = RandomBytes(8)
+		}
+		*salts[val] = salt
+	}
+}
+
+func generateUserKeys(salts *map[string]string, keys *map[string]string, password byte[]) {
+	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "UserMAC"}
+	set := make(map[string]bool)
+	keyLen := 16
+	for _, val := range names {
+		key := RandomBytes(keyLen)
+		salt := salts[val]
+		enc := Argon2Key(password, salt, keyLen)
+		key = SymEnc(enc, RandomBytes(16), key)
+		*keys[val] = key
+	}
+}
+
+func generateRSAKeys(keys *map[string]string) {
+
 }
 
 func GetUser(username string, password string) (userdataptr *User, err error) {
