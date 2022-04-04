@@ -101,11 +101,11 @@ func someUsefulThings() {
 // (e.g. like the Username attribute) and methods (e.g. like the StoreFile method below).
 type User struct {
 	Username string
-	InviteKeys map[string]string
-	Salts map[string]string
-	EncKeys map[string]string
-	Stored map[string]string
-	PasswordHash, UserMAC, KeyUUID string
+	Salts map[string]([]byte)
+	EncKeys map[string]([]byte)
+	Stored map[string]([]byte)
+	PasswordHash []byte
+	UserMAC string //, KeyUUID string
 	// You can add other attributes here if you want! But note that in order for attributes to
 	// be included when this struct is serialized to/from JSON, they must be capitalized.
 	// On the flipside, if you have an attribute that you want to be able to access from
@@ -118,6 +118,10 @@ type TreeNode struct {
 
 }
 
+type KeyStruct struct {
+	Keys map[string]([]byte)
+}
+
 type File struct {
 	IsFile bool
 	OwnerKeys map[string]string
@@ -128,33 +132,73 @@ type File struct {
 // NOTE: The following methods have toy (insecure!) implementations.
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
+	//check if the user exists in the datastore or is empty
+	//TODO RSA STUFF
+
+	//create a user struct
 	var userdata User
-	userdata.Username = username
+	userdata.Username = username //Might have to encrypt this
+	userdata.Salts = make(map[string]([]byte))
+	userdata.EncKeys = make(map[string]([]byte))
+	userdata.Stored = make(map[string]([]byte))
+	generateUserSalts(&userdata)
+	generateUserKeys(&userdata, []byte(password))
+
+	salt := userdata.Salts["userMAC"]
+	key := userlib.Argon2Key([]byte(password), salt, uint32(16))
+	enc := userdata.EncKeys["userMAC"]
+	macKey := userlib.SymDec(key, enc)
+	combined := combineUserData(&userdata)
+	userlib.HMACEval(macKey, combined)
+
+	userdata.PasswordHash = userlib.Hash([]byte(password))
 	return &userdata, nil
 }
 
-func generateUserSalts(salts *map[string]string) {
-	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "UserMAC"}
-	set := make(map[string]bool)
+func combineUserData(userdata *User) []byte {
+	salts := userdata.Salts
+	keys := userdata.EncKeys
+	var combined string = ""
+	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC"}
+
 	for _, val := range names {
-		salt := RandomBytes(8)
-		for set[x] != true {
-			salt = RandomBytes(8)
+		salt := salts[val]
+		enc := keys[val]
+		combined += (string(salt) + string(enc))
+	}
+
+	combined += string(salts["password"])
+
+	return []byte(combined)
+
+}
+func generateUserSalts(userdata *User) {
+	salts := userdata.Salts
+	names := [13]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "password"}
+	set := make(map[string]bool)
+
+	for _, val := range names {
+		salt := userlib.RandomBytes(8)
+		for set[val] != true {
+			salt = userlib.RandomBytes(8)
 		}
-		*salts[val] = salt
+		set[string(salt[:])] = true
+		salts[val] = salt
 	}
 }
 
-func generateUserKeys(salts *map[string]string, keys *map[string]string, password byte[]) {
+func generateUserKeys(userdata *User, password []byte) {
+	salts := userdata.Salts
+	keys := userdata.EncKeys
 	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "UserMAC"}
-	set := make(map[string]bool)
 	keyLen := 16
+
 	for _, val := range names {
-		key := RandomBytes(keyLen)
+		key := userlib.Argon2Key(password, userlib.RandomBytes(16), uint32(keyLen))
 		salt := salts[val]
-		enc := Argon2Key(password, salt, keyLen)
-		key = SymEnc(enc, RandomBytes(16), key)
-		*keys[val] = key
+		enc := userlib.Argon2Key(password, salt, uint32(keyLen))
+		key = userlib.SymEnc(enc, userlib.RandomBytes(16), key)
+		keys[val] = key
 	}
 }
 
