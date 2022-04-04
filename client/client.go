@@ -105,7 +105,7 @@ type User struct {
 	EncKeys map[string]([]byte)
 	Stored map[string]([]byte)
 	PasswordHash []byte
-	UserMAC string //, KeyUUID string
+	UserMAC []byte //, KeyUUID string
 	// You can add other attributes here if you want! But note that in order for attributes to
 	// be included when this struct is serialized to/from JSON, they must be capitalized.
 	// On the flipside, if you have an attribute that you want to be able to access from
@@ -151,7 +151,14 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	combined := combineUserData(&userdata)
 	userlib.HMACEval(macKey, combined)
 
-	userdata.PasswordHash = userlib.Hash([]byte(password))
+	//add salt
+	userdata.PasswordHash = userlib.Hash([]byte(password + string(userdata.Salts["password"])))
+
+	nameHash := userlib.Hash([]byte(username))
+	id, _ := uuid.FromBytes(nameHash[:16])
+	serial, _ := json.Marshal(userdata)
+	userlib.DatastoreSet(id, serial)
+
 	return &userdata, nil
 }
 
@@ -202,14 +209,58 @@ func generateUserKeys(userdata *User, password []byte) {
 	}
 }
 
-func generateRSAKeys(keys *map[string]string) {
+// func generateRSAKeys(keys *map[string]string) {
 
-}
+// }
 
 func GetUser(username string, password string) (userdataptr *User, err error) {
+	//TODO MAKE SURE IT EXIST
 	var userdata User
-	userdataptr = &userdata
+	nameHash := userlib.Hash([]byte(username))
+	id, _ := uuid.FromBytes(nameHash[:16])
+	data, ok := userlib.DatastoreGet(id)
+	if !ok {
+		//error
+	}
+	json.Unmarshal(data, &userdata)
+
+	mac1 := userdata.UserMAC
+	salt := userdata.Salts["userMAC"]
+	key := userlib.Argon2Key([]byte(password), salt, uint32(16))
+	enc := userdata.EncKeys["userMAC"]
+	macKey := userlib.SymDec(key, enc)
+	combined := combineUserData(&userdata)
+	mac2, _ := userlib.HMACEval(macKey, combined)
+	validMAC := userlib.HMACEqual(mac1, mac2)
+	if !validMAC {
+		//error
+	}
+
+	//Password check
+	passHash := userlib.Hash([]byte(password + string(userdata.Salts["password"])))
+	hashOk := userlib.HMACEqual(passHash, userdata.PasswordHash)
+	if !hashOk {
+		//error
+	}
+
+	//Unpack values
+
+	//return
+
+
+
 	return userdataptr, nil
+}
+
+func unpackUserValues(userdata *User, password string) {
+	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "UserMAC"}
+	for _, val := range names {
+		salt := userdata.Salts[val]
+		key := userlib.Argon2Key([]byte(password), salt, uint32(16))
+		enc := userdata.EncKeys[val]
+		store := userlib.SymDec(key, enc)
+		userdata.Stored[val] = store
+	}
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
