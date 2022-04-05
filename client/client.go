@@ -284,7 +284,6 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 	fileValues := unpackFileValues(&filedata)
 	key = userdata.Stored["mac"]
 	macKey := userlib.SymDec(key, filedata.OwnerKeys["fileMac"])
-	enc = userlib.SymEnc(macKey, userlib.RandomBytes(16), fileValues)
 	filedata.MAC, _ = userlib.HMACEval(macKey, fileValues)
 	//generate uuid
 	loc := userdata.Username + filename
@@ -329,15 +328,34 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 }
 
 func (userdata *User) LoadFile(filename string) (content []byte, err error) {
-	storageKey, err := uuid.FromBytes(userlib.Hash([]byte(filename + userdata.Username))[:16])
-	if err != nil {
-		return nil, err
-	}
-	dataJSON, ok := userlib.DatastoreGet(storageKey)
+	loc := userdata.Username + filename
+	locHash := userlib.Hash([]byte(loc))
+	id, _ := uuid.FromBytes(locHash[:16])
+	// if err != nil {
+	// 	return nil, err
+	// }
+	dataJSON, ok := userlib.DatastoreGet(id)
 	if !ok {
 		return nil, errors.New(strings.ToTitle("file not found"))
 	}
-	err = json.Unmarshal(dataJSON, &content)
+	var filedata File
+	err = json.Unmarshal(dataJSON, &filedata)
+	//calc the mac
+	mac1 := filedata.MAC
+	fileValues := unpackFileValues(&filedata)
+	key := userdata.Stored["mac"]
+	macKey := userlib.SymDec(key, filedata.OwnerKeys["fileMac"])
+	mac2, _ := userlib.HMACEval(macKey, fileValues)
+	validMAC := userlib.HMACEqual(mac1, mac2)
+	if !validMAC {
+		//error
+	}
+
+	//decrypt the contents
+	key = userdata.Stored["file"]
+	fileKey := userlib.SymDec(key, filedata.OwnerKeys["fileMac"])
+	content = userlib.SymDec(fileKey, filedata.Contents)
+	
 	return content, err
 }
 
