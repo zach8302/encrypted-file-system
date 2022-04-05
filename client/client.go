@@ -124,9 +124,13 @@ type KeyStruct struct {
 
 type File struct {
 	IsFile bool
-	OwnerKeys map[string]string
-	SharedKeys map[string]string
-	Filename, Contents, MAC, ShareTree string
+	IsSentinel bool
+	Next *File
+	Last *File
+	OwnerKeys map[string]([]byte)
+	SharedKeys map[string]([]byte)
+	Filename, Contents, MAC []byte
+	//ShareTree string
 }
 
 // NOTE: The following methods have toy (insecure!) implementations.
@@ -149,7 +153,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	enc := userdata.EncKeys["userMAC"]
 	macKey := userlib.SymDec(key, enc)
 	combined := combineUserData(&userdata)
-	userlib.HMACEval(macKey, combined)
+	userdata.UserMAC, _ = userlib.HMACEval(macKey, combined)
 
 	//add salt
 	userdata.PasswordHash = userlib.Hash([]byte(password + string(userdata.Salts["password"])))
@@ -244,12 +248,9 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	//Unpack values
-
+	unpackUserValues(&userdata, password)
 	//return
-
-
-
-	return userdataptr, nil
+	return &userdata, nil
 }
 
 func unpackUserValues(userdata *User, password string) {
@@ -264,16 +265,63 @@ func unpackUserValues(userdata *User, password string) {
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
-	storageKey, err := uuid.FromBytes(userlib.Hash([]byte(filename + userdata.Username))[:16])
-	if err != nil {
-		return err
+	var filedata File
+	filedata.OwnerKeys = make(map[string]([]byte))
+	filedata.SharedKeys = make(map[string]([]byte))
+	//generate the file keys
+	generateFileKeys(userdata, &filedata)
+	//encrypt the contents and filename
+	key := userdata.Stored["file"]
+	fileKey := userlib.SymDec(key, filedata.OwnerKeys["contents"])
+	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
+	filedata.Contents = enc
+
+	key = userdata.Stored["filename"]
+	nameKey := userlib.SymDec(key, filedata.OwnerKeys["filename"])
+	enc = userlib.SymEnc(nameKey, userlib.RandomBytes(16), ([]byte)(filename))
+	filedata.Filename = enc
+	//calculate the mac
+	fileValues := unpackFileValues(&filedata)
+	key = userdata.Stored["mac"]
+	macKey := userlib.SymDec(key, filedata.OwnerKeys["fileMac"])
+	enc = userlib.SymEnc(macKey, userlib.RandomBytes(16), fileValues)
+	filedata.MAC, _ = userlib.HMACEval(macKey, fileValues)
+	//generate uuid
+	loc := userdata.Username + filename
+	locHash := userlib.Hash([]byte(loc))
+	id, _ := uuid.FromBytes(locHash[:16])
+	serial, _ := json.Marshal(filedata)
+	userlib.DatastoreSet(id, serial)
+
+	//datastore
+	return nil
+}
+
+func generateFileKeys(userdata *User, filedata *File) {
+	names := [3]string {"contents", "mac", "filename"}
+	keys := [3]string{"file", "fileMac", "filename"}
+	//choose a key and turn it to 6
+	key := userdata.Stored["file"]
+	reason := []byte("generate file keys")
+	derived, _ := userlib.HashKDF(key, reason)
+	for i, val := range names {
+		key := userdata.Stored[keys[i]]
+		slice := derived[i * 16: i * 16 + 16]
+		filedata.OwnerKeys[val] = userlib.SymEnc(key, userlib.RandomBytes(16), slice)
 	}
-	contentBytes, err := json.Marshal(content)
-	if err != nil {
-		return err
+
+}
+
+func unpackFileValues(filedata *File) ([]byte) {
+	data := ""
+	names := [3]string {"contents", "mac", "filename"}
+	for _, val := range names {
+		owner := filedata.OwnerKeys[val]
+		//shared := filedata.SharedKeys
+		data += string(owner) //+ string(shared) 
 	}
-	userlib.DatastoreSet(storageKey, contentBytes)
-	return
+	data += string(filedata.Filename) + string(filedata.Contents) + string(filedata.MAC)
+	return []byte(data)
 }
 
 func (userdata *User) AppendToFile(filename string, content []byte) error {
