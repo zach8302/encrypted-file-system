@@ -134,6 +134,10 @@ var _ = Describe("Client Tests", func() {
 			err = aliceDesktop.StoreFile(aliceFile, []byte(contentOne))
 			Expect(err).To(BeNil())
 
+			userlib.DebugMsg("aliceDesktop loading file %s with content: %s", aliceFile, contentOne)
+			_, err = aliceDesktop.LoadFile(aliceFile)
+			Expect(err).To(BeNil())
+
 			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
 			invite, err := aliceLaptop.CreateInvitation(aliceFile, "bob")
 			Expect(err).To(BeNil())

@@ -104,6 +104,7 @@ type User struct {
 	Salts map[string]([]byte)
 	EncKeys map[string]([]byte)
 	Stored map[string]([]byte)
+	PublicKeys map[string]([]byte)
 	PasswordHash []byte
 	UserMAC []byte //, KeyUUID string
 	// You can add other attributes here if you want! But note that in order for attributes to
@@ -118,20 +119,34 @@ type TreeNode struct {
 
 }
 
-type KeyStruct struct {
-	Keys map[string]([]byte)
-}
-
 type File struct {
-	IsFile bool
-	IsSentinel bool
 	Next uuid.UUID
 	Last uuid.UUID
-	OwnerKeys map[string]([]byte)
-	SharedKeys map[string]([]byte)
-	Filename, Contents, MAC []byte
+	OwnerKey []byte
+	SharedKey []byte
+	UnlockKey []byte
+	Filename, Contents, MAC, Owner []byte
 	ID uuid.UUID
 	//ShareTree string
+}
+
+type SharedFile struct {
+	OwnerReceiver []byte
+	SharedKey []byte
+	//tree
+
+
+}
+
+type Invitation struct {
+	OwnerReceiver []byte
+	SharedKey []byte
+	//tree
+}
+
+type FileSentinel struct {
+	IsFile bool
+	ID uuid.UUID
 }
 
 // NOTE: The following methods have toy (insecure!) implementations.
@@ -169,7 +184,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 func combineUserData(userdata *User) []byte {
 	var combined string = ""
-	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC"}
+	names := [14]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSAUsername", "RSATreeNode", "share", "userMAC"}
 
 	for _, val := range names {
 		salt := userdata.Salts[val]
@@ -183,7 +198,7 @@ func combineUserData(userdata *User) []byte {
 
 }
 func generateUserSalts(userdata *User) {
-	names := [13]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "password"}
+	names := [15]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "RSAUsername", "userMAC", "share", "password"}
 	set := make(map[string]bool)
 	for _, val := range names {
 		salt := userlib.RandomBytes(8)
@@ -197,7 +212,8 @@ func generateUserSalts(userdata *User) {
 }
 
 func generateUserKeys(userdata *User, password []byte) {
-	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC"}
+	names := [9]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "share", "userMAC"}
+	rsaNames := [5]string {"RSAFile", "RSAMac", "RSAUsername", "RSAFilename", "RSATreeNode"}
 	keyLen := 16
 
 	for _, val := range names {
@@ -207,11 +223,18 @@ func generateUserKeys(userdata *User, password []byte) {
 		key = userlib.SymEnc(enc, userlib.RandomBytes(16), key)
 		userdata.EncKeys[val] = key
 	}
+	//fix
+	for _, val := range rsaNames {
+		pub, priv, _ := userlib.PKEKeyGen()
+		salt := userdata.Salts[val]
+		enc := userlib.Argon2Key(password, salt, uint32(keyLen))
+		serial, _ := json.Marshal(priv)
+		key := userlib.SymEnc(enc, userlib.RandomBytes(16), serial)
+		userdata.EncKeys[val] = key
+		userlib.KeystoreSet(userdata.Username + val, pub)
+	}
 }
 
-// func generateRSAKeys(keys *map[string]string) {
-
-// }
 
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	//TODO MAKE SURE IT EXIST
@@ -250,7 +273,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 }
 
 func unpackUserValues(userdata *User, password string) {
-	names := [12]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC"}
+	names := [14]string  {"file", "filename", "fileMac", "fileKey", "treeKey", "treeMac", "fileLocKey", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "RSAUsername", "share", "userMAC"}
 	for _, val := range names {
 		salt := userdata.Salts[val]
 		key := userlib.Argon2Key([]byte(password), salt, uint32(16))
@@ -261,68 +284,77 @@ func unpackUserValues(userdata *User, password string) {
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
+	var sentinel FileSentinel
+	sentinel.IsFile = true
+	
 	var filedata File
 	createFile(userdata, &filedata, filename, content)
 	//generate uuid
-	loc := userdata.Username + filename
-	locHash := userlib.Hash([]byte(loc))
-	id, _ := uuid.FromBytes(locHash[:16])
+	id := uuid.New()
 	filedata.Last = id
 	filedata.ID = id
+	sentinel.ID = id
+
 	serial, _ := json.Marshal(filedata)
 	userlib.DatastoreSet(id, serial)
 
+	loc := userdata.Username + "/" + filename
+	locHash := userlib.Hash([]byte(loc))
+	id, _ = uuid.FromBytes(locHash[:16])
+	serial, _ = json.Marshal(sentinel)
+	fmt.Println(userdata.Username)
+	fmt.Println(filedata.OwnerKey)
+	fmt.Println(filedata.ID)
+	userlib.DatastoreSet(id, serial)
+	
 	//datastore
 	return nil
 }
 
 func createFile(userdata *User, filedata *File, filename string, content []byte) {
-	filedata.OwnerKeys = make(map[string]([]byte))
-	filedata.SharedKeys = make(map[string]([]byte))
-	filedata.IsSentinel = true
-	filedata.IsFile = true
 	filedata.Next, _ = uuid.FromBytes([]byte("nil"))
 	filedata.Last, _ = uuid.FromBytes([]byte("nil"))
 	//generate the file keys
 	generateFileKeys(userdata, filedata)
 	//encrypt the contents and filename
 	key := userdata.Stored["file"]
-	fileKey := userlib.SymDec(key, filedata.OwnerKeys["contents"])
+	fileKey := userlib.SymDec(key, filedata.OwnerKey)
 	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
 	filedata.Contents = enc
 
-	key = userdata.Stored["filename"]
-	nameKey := userlib.SymDec(key, filedata.OwnerKeys["filename"])
+	nameKey := userlib.SymDec(key, filedata.OwnerKey)
 	enc = userlib.SymEnc(nameKey, userlib.RandomBytes(16), ([]byte)(filename))
 	filedata.Filename = enc
 	//calculate the mac
 	fileValues := unpackFileValues(filedata)
-	key = userdata.Stored["userMAC"]
-	macKey := userlib.SymDec(key, filedata.OwnerKeys["mac"])
+	macKey := userlib.SymDec(key, filedata.OwnerKey)
 	filedata.MAC, _ = userlib.HMACEval(macKey, fileValues)
 }
 
 func generateFileKeys(userdata *User, filedata *File) {
-	names := [3]string {"contents", "mac", "filename"}
-	keys := [3]string{"file", "fileMac", "filename"}
 	//choose a key and turn it to 6
 	key := userdata.Stored["file"]
-	reason := []byte("generate file keys")
+	reason := userlib.RandomBytes(16)
 	derived, _ := userlib.HashKDF(key, reason)
-	for i, val := range names {
-		key := userdata.Stored[keys[i]]
-		slice := derived[i * 16: i * 16 + 16]
-		filedata.OwnerKeys[val] = userlib.SymEnc(key, userlib.RandomBytes(16), slice)
-	}
 
+	owner := derived[:16]
+	filedata.OwnerKey = userlib.SymEnc(key, userlib.RandomBytes(16), owner)
+	filedata.Owner = userlib.SymEnc(owner, userlib.RandomBytes(16), []byte(userdata.Username))
+
+
+	reason = userlib.RandomBytes(16)
+	derived, _ = userlib.HashKDF(key, reason)
+	slice := derived[16:32]
+	filedata.UnlockKey = userlib.SymEnc(key, userlib.RandomBytes(16), slice)
+	filedata.SharedKey = userlib.SymEnc(slice, userlib.RandomBytes(16), owner)
 
 }
 
 func unpackFileValues(filedata *File) ([]byte) {
 	data := ""
 	names := [3]string {"contents", "mac", "filename"}
-	for _, val := range names {
-		owner := filedata.OwnerKeys[val]
+	for _, _ = range names {
+		owner := filedata.OwnerKey
 		//shared := filedata.SharedKeys
 		data += string(owner) //+ string(shared) 
 	}
@@ -331,12 +363,28 @@ func unpackFileValues(filedata *File) ([]byte) {
 }
 
 func (userdata *User) AppendToFile(filename string, content []byte) error {
-	loc := userdata.Username + filename
+	var sentinel FileSentinel
+	loc := userdata.Username + "/" + filename
 	locHash := userlib.Hash([]byte(loc))
 	id, _ := uuid.FromBytes(locHash[:16])
 	// if err != nil {
 	// 	return nil, err
 	// }
+	dataJSON, ok := userlib.DatastoreGet(id)
+	if !ok {
+		//return nil, errors.New(strings.ToTitle("file not found"))
+	}
+	json.Unmarshal(dataJSON, &sentinel)
+
+	if sentinel.IsFile {
+		ownerAppend(userdata, filename, content, sentinel.ID)
+	}
+
+
+	return nil
+}
+
+func ownerAppend(userdata *User, filename string, content []byte, id uuid.UUID) error{
 	dataJSON, ok := userlib.DatastoreGet(id)
 	if !ok {
 		//return nil, errors.New(strings.ToTitle("file not found"))
@@ -376,20 +424,29 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	serial, _ = json.Marshal(filedata)
 	userlib.DatastoreSet(filedata.ID, serial)
 
-	
-
 	return nil
 }
 
 func (userdata *User) LoadFile(filename string) (content []byte, err error) {
-	loc := userdata.Username + filename
+	var sentinel FileSentinel
+	loc := userdata.Username + "/" + filename
 	locHash := userlib.Hash([]byte(loc))
 	id, _ := uuid.FromBytes(locHash[:16])
+	dataJSON, ok := userlib.DatastoreGet(id)
+	if !ok {
+	// 	return nil, errors.New(strings.ToTitle("file not found"))
+	}
+	json.Unmarshal(dataJSON, &sentinel)
 	// if err != nil {
 	// 	return nil, err
 	// }
 
-	content = decryptFile(userdata, id)
+	if sentinel.IsFile {
+		id = sentinel.ID
+		content = decryptFile(userdata, id)
+	}
+
+	
 
 	
 	return content, err
@@ -410,10 +467,10 @@ func decryptFile(userdata *User, file uuid.UUID) ([]byte) {
 	empty, _ := uuid.FromBytes([]byte("nil"))
 	for file != empty {
 		getFile(&filedata, file)
-		key := userdata.Stored["fileMac"]
-		macKey := userlib.SymDec(key, filedata.OwnerKeys["mac"])
+		key := userdata.Stored["file"]
+		macKey := userlib.SymDec(key, filedata.OwnerKey)
 		key = userdata.Stored["file"]
-		fileKey := userlib.SymDec(key, filedata.OwnerKeys["contents"])
+		fileKey := userlib.SymDec(key, filedata.OwnerKey)
 		mac1 := filedata.MAC
 		fileValues := unpackFileValues(&filedata)
 		
@@ -423,6 +480,10 @@ func decryptFile(userdata *User, file uuid.UUID) ([]byte) {
 			//error
 		}
 
+		fmt.Println(userdata.Username)
+		fmt.Println(filedata.OwnerKey)
+		fmt.Println(filedata.ID)
+
 		//decrypt the contents
 		content += string(userlib.SymDec(fileKey, filedata.Contents))
 
@@ -431,9 +492,44 @@ func decryptFile(userdata *User, file uuid.UUID) ([]byte) {
 	return []byte(content)
 }
 
-func (userdata *User) CreateInvitation(filename string, recipientUsername string) (
-	invitationPtr uuid.UUID, err error) {
-	return
+
+func (userdata *User) CreateInvitation(filename string, recipientUsername string) (invitationPtr uuid.UUID, err error) {
+	//todo integrity
+
+	loc := userdata.Username + "/" + filename
+	locHash := userlib.Hash([]byte(loc))
+	id, _ := uuid.FromBytes(locHash[:16])
+	data, ok := userlib.DatastoreGet(id)
+	if !ok {
+		//error
+	}
+	var sentinel FileSentinel
+	json.Unmarshal(data, &sentinel)
+
+	var filedata File
+	getFile(&filedata, sentinel.ID)
+
+	key := userdata.Stored["file"]
+	fmt.Println(userdata.Username)
+	fmt.Println(filedata.OwnerKey)
+	fmt.Println(filedata.ID)
+	shared := userlib.SymDec(key, filedata.OwnerKey)
+
+	pub, ok := userlib.KeystoreGet(recipientUsername + "RSAFile")
+	if !ok {
+		//error
+	}
+
+	//deal with owner username for revoke
+
+	var invitation Invitation
+	invitation.SharedKey, _ = userlib.PKEEnc(pub, shared)
+
+	serial, _ := json.Marshal(invitation)
+	id = uuid.New()
+	userlib.DatastoreSet(id, serial)
+
+	return id, nil
 }
 
 func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid.UUID, filename string) error {
