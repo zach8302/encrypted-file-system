@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	// Useful for formatting strings (e.g. `fmt.Sprintf`).
-	"fmt"
+	//"fmt"
 
 	// Useful for creating new error messages to return using errors.New("...")
 	"errors"
@@ -555,8 +555,6 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		//deal with owner username for revoke
 
 		var invitation Invitation
-		fmt.Println("direct")
-		fmt.Println(shared)
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, shared)
 		invitation.Filename = filename
 		invitation.TreeID = treeId
@@ -597,9 +595,6 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 
 		serial, _ = json.Marshal(newTree)
 		userlib.DatastoreSet(treeId, serial)
-
-		fmt.Println("indirect")
-		fmt.Println(key)
 
 		var invitation Invitation
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, key)
@@ -657,18 +652,14 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	json.Unmarshal(dataJSON, &oldSentinel)
 
 	if oldSentinel.IsFile {
-		fmt.Println("HERE I AM")
 		shared.FileID = oldSentinel.ID
 	} else {
-		fmt.Println("NO HERE")
-		fmt.Println(oldSentinel.ID)
 		var oldShared SharedFile
 		getShared(&oldShared, oldSentinel.ID)
 		shared.FileID = oldShared.FileID
 	}
 	
 
-	fmt.Println(shared.FileID)
 	id := uuid.New()
 	serial, _ := json.Marshal(shared)
 	userlib.DatastoreSet(id, serial)
