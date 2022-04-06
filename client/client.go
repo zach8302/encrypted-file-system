@@ -130,6 +130,7 @@ type File struct {
 	OwnerKeys map[string]([]byte)
 	SharedKeys map[string]([]byte)
 	Filename, Contents, MAC []byte
+	ID uuid.UUID
 	//ShareTree string
 }
 
@@ -266,6 +267,8 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 	loc := userdata.Username + filename
 	locHash := userlib.Hash([]byte(loc))
 	id, _ := uuid.FromBytes(locHash[:16])
+	filedata.Last = id
+	filedata.ID = id
 	serial, _ := json.Marshal(filedata)
 	userlib.DatastoreSet(id, serial)
 
@@ -278,8 +281,8 @@ func createFile(userdata *User, filedata *File, filename string, content []byte)
 	filedata.SharedKeys = make(map[string]([]byte))
 	filedata.IsSentinel = true
 	filedata.IsFile = true
-	filedata.Next = uuid.UUIDNil
-	filedata.Last = uuid.UUIDNil
+	filedata.Next, _ = uuid.FromBytes([]byte("nil"))
+	filedata.Last, _ = uuid.FromBytes([]byte("nil"))
 	//generate the file keys
 	generateFileKeys(userdata, filedata)
 	//encrypt the contents and filename
@@ -344,7 +347,7 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	lastID := filedata.Last
 	dataJSON, ok = userlib.DatastoreGet(lastID)
 	if !ok {
-		//return nil, errors.New(strings.ToTitle("file not found"))
+		return errors.New(strings.ToTitle("file not found"))
 	}
 	var lastFile File
 	json.Unmarshal(dataJSON, &lastFile)
@@ -354,8 +357,26 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	createFile(userdata, &appendFile, filename, content)
 	//add to the end
 	lastUUID := uuid.New()
+	
 	filedata.Last = lastUUID
-	lastFile.Next = lastUUID
+	
+	appendFile.ID = lastUUID
+	serial, _ := json.Marshal(appendFile)
+	userlib.DatastoreSet(lastUUID, serial)
+
+
+	if lastFile.ID == filedata.ID {
+		filedata.Next = lastUUID
+	} else {
+		lastFile.Next = lastUUID
+		serial, _ = json.Marshal(lastFile)
+		userlib.DatastoreSet(lastFile.ID, serial)
+	}
+
+	serial, _ = json.Marshal(filedata)
+	userlib.DatastoreSet(filedata.ID, serial)
+
+	
 
 	return nil
 }
@@ -367,16 +388,9 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 	// if err != nil {
 	// 	return nil, err
 	// }
-	dataJSON, ok := userlib.DatastoreGet(id)
-	if !ok {
-		return nil, errors.New(strings.ToTitle("file not found"))
-	}
-	var filedata File
-	err = json.Unmarshal(dataJSON, &filedata)
 
-	content = decryptFile(userdata, &filedata)
+	content = decryptFile(userdata, id)
 
-	fmt.Println(content)
 	
 	return content, err
 }
@@ -388,17 +402,20 @@ func getFile(filedata *File, id uuid.UUID) {
 	}
 	json.Unmarshal(dataJSON, &filedata)
 }
+
 //TODO errors
-func decryptFile(userdata *User, filedata *File) ([]byte) {
+func decryptFile(userdata *User, file uuid.UUID) ([]byte) {
 	var content string = ""
-	curr := filedata
-	key := userdata.Stored["fileMac"]
-	macKey := userlib.SymDec(key, filedata.OwnerKeys["mac"])
-	key = userdata.Stored["file"]
-	fileKey := userlib.SymDec(key, filedata.OwnerKeys["contents"])
-	for curr != nil {
+	var filedata File
+	empty, _ := uuid.FromBytes([]byte("nil"))
+	for file != empty {
+		getFile(&filedata, file)
+		key := userdata.Stored["fileMac"]
+		macKey := userlib.SymDec(key, filedata.OwnerKeys["mac"])
+		key = userdata.Stored["file"]
+		fileKey := userlib.SymDec(key, filedata.OwnerKeys["contents"])
 		mac1 := filedata.MAC
-		fileValues := unpackFileValues(filedata)
+		fileValues := unpackFileValues(&filedata)
 		
 		mac2, _ := userlib.HMACEval(macKey, fileValues)
 		validMAC := userlib.HMACEqual(mac1, mac2)
@@ -409,7 +426,7 @@ func decryptFile(userdata *User, filedata *File) ([]byte) {
 		//decrypt the contents
 		content += string(userlib.SymDec(fileKey, filedata.Contents))
 
-		curr = filedata.Next
+		file = filedata.Next
 	}
 	return []byte(content)
 }
