@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	// Useful for formatting strings (e.g. `fmt.Sprintf`).
-	"fmt"
+	//"fmt"
 
 	// Useful for creating new error messages to return using errors.New("...")
 	"errors"
@@ -541,8 +541,6 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		tree.Children = x
 		newTree.Username = recipientUsername
 
-		fmt.Println(userdata.Username)
-		fmt.Println(tree.Children)
 
 		serial, _ := json.Marshal(tree)
 		userlib.DatastoreSet(filedata.TreeID, serial)
@@ -592,8 +590,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 
 		tree.Children = x
 		newTree.Username = recipientUsername
-		fmt.Println(userdata.Username)
-		fmt.Println(tree.Children)
+
 
 		serial, _ := json.Marshal(tree)
 		userlib.DatastoreSet(shared.TreeID, serial)
@@ -691,8 +688,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 }
 
 func findUser(tree uuid.UUID, username string) (bool, uuid.UUID) {
-	fmt.Println("tree")
-	fmt.Println(tree)
+
 	i := 0
 	q := make([]uuid.UUID, 1)
 	q[0] = tree
@@ -701,16 +697,12 @@ func findUser(tree uuid.UUID, username string) (bool, uuid.UUID) {
 		id := q[i]
 		data, ok := userlib.DatastoreGet(id)
 		if !ok {
-			fmt.Println(node.Username)
 			i+=1
 			continue
 		}
 		json.Unmarshal(data, &node)
-		fmt.Println(node.Children)
-		fmt.Println(node.Username)
+
 		if node.Username == username {
-			fmt.Println("gotcha")
-			fmt.Println(username)
 			return true, id
 		}
 		
@@ -718,6 +710,7 @@ func findUser(tree uuid.UUID, username string) (bool, uuid.UUID) {
 			q = append(q, child)
 		}
 		i += 1
+
 	}
 	return false, uuid.New()
 	//error
@@ -729,7 +722,6 @@ func pruneTree(tree uuid.UUID) {
 	i := 0
 	q := make([]uuid.UUID, 1)
 	q[0] = tree
-	fmt.Println("HELLO")
 	var node TreeNode
 	for i < len(q) {
 		id := q[i]
@@ -740,8 +732,7 @@ func pruneTree(tree uuid.UUID) {
 		json.Unmarshal(data, &node)
 		for _, child := range node.Children {
 			q = append(q, child)
-			fmt.Println("q")
-			fmt.Println(q)
+
 
 		}
 
