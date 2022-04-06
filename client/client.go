@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	// Useful for formatting strings (e.g. `fmt.Sprintf`).
-	//"fmt"
+	"fmt"
 
 	// Useful for creating new error messages to return using errors.New("...")
 	"errors"
@@ -527,7 +527,6 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		getFile(&filedata, sentinel.ID)
 		key := userdata.Stored["file"]
 		shared := userlib.SymDec(key, filedata.OwnerKey)
-		name := userlib.SymDec(shared, filedata.Filename)
 
 		var tree TreeNode
 		treeFromFile(&filedata, &tree)
@@ -556,8 +555,10 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		//deal with owner username for revoke
 
 		var invitation Invitation
+		fmt.Println("direct")
+		fmt.Println(shared)
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, shared)
-		invitation.Filename = string(name)
+		invitation.Filename = filename
 		invitation.TreeID = treeId
 
 		serial, _ = json.Marshal(invitation)
@@ -570,7 +571,6 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		var filedata File
 		getFile(&filedata, shared.FileID)
 		key, _ := getSharedKey(userdata, &shared)
-		name := userlib.SymDec(key, filedata.Filename)
 		//getFile(&filedata, shared.FileID)
 		pub, ok := userlib.KeystoreGet(recipientUsername + "RSAFile")
 		if !ok {
@@ -598,9 +598,12 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		serial, _ = json.Marshal(newTree)
 		userlib.DatastoreSet(treeId, serial)
 
+		fmt.Println("indirect")
+		fmt.Println(key)
+
 		var invitation Invitation
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, key)
-		invitation.Filename = string(name)
+		invitation.Filename = filename
 		invitation.TreeID = treeId
 
 
@@ -653,8 +656,19 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	}
 	json.Unmarshal(dataJSON, &oldSentinel)
 
+	if oldSentinel.IsFile {
+		fmt.Println("HERE I AM")
+		shared.FileID = oldSentinel.ID
+	} else {
+		fmt.Println("NO HERE")
+		fmt.Println(oldSentinel.ID)
+		var oldShared SharedFile
+		getShared(&oldShared, oldSentinel.ID)
+		shared.FileID = oldShared.FileID
+	}
+	
 
-	shared.FileID = oldSentinel.ID
+	fmt.Println(shared.FileID)
 	id := uuid.New()
 	serial, _ := json.Marshal(shared)
 	userlib.DatastoreSet(id, serial)
