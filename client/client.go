@@ -45,7 +45,8 @@ type User struct {
 }
 
 type TreeNode struct {
-
+	Username string
+	Children []uuid.UUID
 }
 
 type File struct {
@@ -56,13 +57,13 @@ type File struct {
 	UnlockKey []byte
 	Filename, Contents, MAC, Owner []byte
 	ID uuid.UUID
-	//ShareTree string
+	TreeID uuid.UUID
 }
 
 type SharedFile struct {
-	OwnerReceiver []byte
+	Username string
 	SharedKey []byte
-	//tree
+	TreeID uuid.UUID
 	FileID uuid.UUID
 }
 
@@ -70,12 +71,13 @@ type Invitation struct {
 	OwnerReceiver []byte
 	SharedKey []byte
 	Filename string
-	//tree
+	TreeID uuid.UUID
 }
 
 type FileSentinel struct {
 	IsFile bool
 	ID uuid.UUID
+
 }
 
 // NOTE: The following methods have toy (insecure!) implementations.
@@ -232,6 +234,9 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 			var shared SharedFile
 			getShared(&shared, sentinel.ID)
 			key, _ = getSharedKey(userdata, &shared)
+			if !authenticateFile(userdata, &shared) {
+				return errors.New(strings.ToTitle("Not allowed to access"))
+			}
 			getFile(&filedata, shared.FileID)	
 			updateFile(&filedata, filename, content, key)
 			serial, _ := json.Marshal(filedata)
@@ -271,18 +276,20 @@ func createFile(userdata *User, filedata *File, filename string, content []byte,
 	if append {
 		copyKeys(filedata, prev)
 	} else {
-		generateFileKeys(userdata, filedata)	
+		generateFileKeys(userdata, filedata)
+		var tree TreeNode
+		serial, _ := json.Marshal(tree)
+		id := uuid.New()
+		userlib.DatastoreSet(id, serial)
+		filedata.TreeID	= id
+		userlib.DatastoreSet(id, serial)
 	}
 	//encrypt the contents and filename
 	var key []byte
 	if shared {
 		key = pos
-		fmt.Println("HI")
-		fmt.Println(pos)
 	} else {
 		key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
-		fmt.Println("BYE")
-		fmt.Println(filedata.OwnerKey)
 	}
 	
 	enc := userlib.SymEnc(key, userlib.RandomBytes(16), content)
@@ -351,19 +358,18 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	// }
 	dataJSON, ok := userlib.DatastoreGet(id)
 	if !ok {
-		//return nil, errors.New(strings.ToTitle("file not found"))
+		return errors.New(strings.ToTitle("file not found"))
 	}
 	json.Unmarshal(dataJSON, &sentinel)
 
 	if sentinel.IsFile {
-		fmt.Println("1")
-		fmt.Println(sentinel.ID)
 		ownerAppend(userdata, filename, content, sentinel.ID, false, nil)
 	} else {
 		var shared SharedFile
 		getShared(&shared, sentinel.ID)
-		fmt.Println("3")
-		fmt.Println(shared.FileID)
+		if !authenticateFile(userdata, &shared) {
+				return errors.New(strings.ToTitle("Not allowed to access"))
+			}
 		key, _ := getSharedKey(userdata, &shared)
 		ownerAppend(userdata, filename, content, shared.FileID, true, key)
 	}
@@ -438,6 +444,9 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 	} else {
 		var shared SharedFile
 		getShared(&shared, sentinel.ID)
+		if !authenticateFile(userdata, &shared) {
+			return nil, errors.New(strings.ToTitle("Not allowed to access"))
+		}
 		key, _ := getSharedKey(userdata, &shared)
 		content = decryptFile(userdata, shared.FileID, true, key)
 	}
@@ -512,14 +521,34 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	var sentinel FileSentinel
 	json.Unmarshal(data, &sentinel)
 
+
 	if sentinel.IsFile {
 		var filedata File
 		getFile(&filedata, sentinel.ID)
 		key := userdata.Stored["file"]
 		shared := userlib.SymDec(key, filedata.OwnerKey)
-		fmt.Println("YO")
-		fmt.Println(filedata.OwnerKey)
 		name := userlib.SymDec(shared, filedata.Filename)
+
+		var tree TreeNode
+		treeFromFile(&filedata, &tree)
+
+		var newTree TreeNode
+		treeId := uuid.New()
+
+		children := tree.Children[:]
+		x := append(children, treeId)
+
+		tree.Children = x
+		newTree.Username = recipientUsername
+
+		fmt.Println(userdata.Username)
+		fmt.Println(tree.Children)
+
+		serial, _ := json.Marshal(tree)
+		userlib.DatastoreSet(filedata.TreeID, serial)
+
+		serial, _ = json.Marshal(newTree)
+		userlib.DatastoreSet(treeId, serial)
 
 		pub, ok := userlib.KeystoreGet(recipientUsername + "RSAFile")
 		if !ok {
@@ -531,8 +560,9 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		var invitation Invitation
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, shared)
 		invitation.Filename = string(name)
+		invitation.TreeID = treeId
 
-		serial, _ := json.Marshal(invitation)
+		serial, _ = json.Marshal(invitation)
 		id = uuid.New()
 		userlib.DatastoreSet(id, serial)
 		return id, nil
@@ -540,7 +570,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		var shared SharedFile
 		getShared(&shared, sentinel.ID)
 		var filedata File
-		getFile(&filedata, sentinel.ID)
+		getFile(&filedata, shared.FileID)
 		key, _ := getSharedKey(userdata, &shared)
 		name := userlib.SymDec(key, filedata.Filename)
 		//getFile(&filedata, shared.FileID)
@@ -551,19 +581,56 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		}
 
 		//deal with owner username for revoke
-		fmt.Println("YO")
-		fmt.Println(key)
+		var tree TreeNode
+		treeFromShared(&shared, &tree)
+
+		var newTree TreeNode
+		treeId := uuid.New()
+
+		children := tree.Children[:]
+		x := append(children, treeId)
+
+		tree.Children = x
+		newTree.Username = recipientUsername
+		fmt.Println(userdata.Username)
+		fmt.Println(tree.Children)
+
+		serial, _ := json.Marshal(tree)
+		userlib.DatastoreSet(shared.TreeID, serial)
+
+		serial, _ = json.Marshal(newTree)
+		userlib.DatastoreSet(treeId, serial)
+
 		var invitation Invitation
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, key)
 		invitation.Filename = string(name)
+		invitation.TreeID = treeId
 
 
-		serial, _ := json.Marshal(invitation)
+		serial, _ = json.Marshal(invitation)
 		id = uuid.New()
 		userlib.DatastoreSet(id, serial)
 		return id, nil
 	}
 	
+}
+
+func treeFromFile(filedata *File, tree *TreeNode) {
+	id := filedata.TreeID
+	data, ok := userlib.DatastoreGet(id)
+	if !ok {
+		//error
+	}
+	json.Unmarshal(data, tree)
+}
+
+func treeFromShared(shared *SharedFile, tree *TreeNode) {
+	id := shared.TreeID
+	data, ok := userlib.DatastoreGet(id)
+	if !ok {
+		//error
+	}
+	json.Unmarshal(data, tree)
 }
 
 func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid.UUID, filename string) error {
@@ -575,9 +642,10 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	// 	return nil, errors.New(strings.ToTitle("file not found"))
 	}
 	json.Unmarshal(dataJSON, &invite)
-	
 
-	shared.OwnerReceiver, shared.SharedKey = invite.OwnerReceiver, invite.SharedKey
+	shared.SharedKey = invite.SharedKey
+	shared.Username = userdata.Username
+	shared.TreeID = invite.TreeID
 	loc := senderUsername + "/" + invite.Filename
 	locHash := userlib.Hash([]byte(loc))
 	fileLoc, _ := uuid.FromBytes(locHash[:16])
@@ -590,8 +658,6 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 
 
 	shared.FileID = oldSentinel.ID
-	fmt.Println("2")
-	fmt.Println(shared.FileID)
 	id := uuid.New()
 	serial, _ := json.Marshal(shared)
 	userlib.DatastoreSet(id, serial)
@@ -608,5 +674,84 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 }
 
 func (userdata *User) RevokeAccess(filename string, recipientUsername string) error {
+	loc := userdata.Username + "/" + filename
+	locHash := userlib.Hash([]byte(loc))
+	id, _ := uuid.FromBytes(locHash[:16])
+	var filedata File 
+	var sentinel FileSentinel
+	dataJSON, ok := userlib.DatastoreGet(id)
+	if !ok {
+	// 	return nil, errors.New(strings.ToTitle("file not found"))
+	}
+	json.Unmarshal(dataJSON, &sentinel)
+	getFile(&filedata, sentinel.ID)
+	_, x := findUser(filedata.TreeID, recipientUsername)
+	pruneTree(x)
 	return nil
+}
+
+func findUser(tree uuid.UUID, username string) (bool, uuid.UUID) {
+	fmt.Println("tree")
+	fmt.Println(tree)
+	i := 0
+	q := make([]uuid.UUID, 1)
+	q[0] = tree
+	var node TreeNode
+	for i < len(q) {
+		id := q[i]
+		data, ok := userlib.DatastoreGet(id)
+		if !ok {
+			fmt.Println(node.Username)
+			i+=1
+			continue
+		}
+		json.Unmarshal(data, &node)
+		fmt.Println(node.Children)
+		fmt.Println(node.Username)
+		if node.Username == username {
+			fmt.Println("gotcha")
+			fmt.Println(username)
+			return true, id
+		}
+		
+		for _, child := range node.Children {
+			q = append(q, child)
+		}
+		i += 1
+	}
+	return false, uuid.New()
+	//error
+
+}
+
+
+func pruneTree(tree uuid.UUID) {
+	i := 0
+	q := make([]uuid.UUID, 1)
+	q[0] = tree
+	fmt.Println("HELLO")
+	var node TreeNode
+	for i < len(q) {
+		id := q[i]
+		data, ok := userlib.DatastoreGet(id)
+		if !ok {
+			//error
+		}
+		json.Unmarshal(data, &node)
+		for _, child := range node.Children {
+			q = append(q, child)
+			fmt.Println("q")
+			fmt.Println(q)
+
+		}
+
+		userlib.DatastoreDelete(id)
+		i += 1
+	}
+	
+}
+
+func authenticateFile(userdata *User, shared *SharedFile) (bool) {
+	ok, _ := findUser(shared.TreeID, userdata.Username)
+	return ok
 }
