@@ -83,9 +83,6 @@ type FileSentinel struct {
 // NOTE: The following methods have toy (insecure!) implementations.
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
-	//check if the user exists in the datastore or is empty
-	//TODO RSA STUFF
-
 	//create a user struct
 	var userdata User
 	userdata.Username = username //Might have to encrypt this
@@ -100,7 +97,6 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	macKey := userlib.SymDec(key, enc)
 	combined := combineUserData(&userdata)
 	userdata.UserMAC, _ = userlib.HMACEval(macKey, combined)
-	//add salt
 	userdata.PasswordHash = userlib.Hash([]byte(password + string(userdata.Salts["password"])))
 
 	nameHash := userlib.Hash([]byte(username))
@@ -154,7 +150,6 @@ func generateUserKeys(userdata *User, password []byte) {
 		key = userlib.SymEnc(enc, userlib.RandomBytes(16), key)
 		userdata.EncKeys[val] = key
 	}
-	//fix
 	for _, val := range rsaNames {
 		pub, priv, _ := userlib.PKEKeyGen()
 		salt := userdata.Salts[val]
@@ -174,7 +169,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	id, _ := uuid.FromBytes(nameHash[:16])
 	data, ok := userlib.DatastoreGet(id)
 	if !ok {
-		//error
+		return nil, errors.New(strings.ToTitle("User not found"))
 	}
 	json.Unmarshal(data, &userdata)
 
@@ -187,14 +182,14 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	mac2, _ := userlib.HMACEval(macKey, combined)
 	validMAC := userlib.HMACEqual(mac1, mac2)
 	if !validMAC {
-		//error
+		return nil, errors.New(strings.ToTitle("Data Integrity Error"))
 	}
 
 	//Password check
 	passHash := userlib.Hash([]byte(password + string(userdata.Salts["password"])))
 	hashOk := userlib.HMACEqual(passHash, userdata.PasswordHash)
 	if !hashOk {
-		//error
+		return nil, errors.New(strings.ToTitle("Invalid Password"))
 	}
 
 	//Unpack values
@@ -352,10 +347,10 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	var sentinel FileSentinel
 	loc := userdata.Username + "/" + filename
 	locHash := userlib.Hash([]byte(loc))
-	id, _ := uuid.FromBytes(locHash[:16])
-	// if err != nil {
-	// 	return nil, err
-	// }
+	id, err := uuid.FromBytes(locHash[:16])
+	if err != nil {
+		return err
+	}
 	dataJSON, ok := userlib.DatastoreGet(id)
 	if !ok {
 		return errors.New(strings.ToTitle("file not found"))
@@ -381,7 +376,7 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 func ownerAppend(userdata *User, filename string, content []byte, id uuid.UUID, shared bool, pos []byte) error{
 	dataJSON, ok := userlib.DatastoreGet(id)
 	if !ok {
-		//return nil, errors.New(strings.ToTitle("file not found"))
+		return errors.New(strings.ToTitle("file not found"))
 	}
 	var filedata File
 	json.Unmarshal(dataJSON, &filedata)
@@ -683,7 +678,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	var sentinel FileSentinel
 	dataJSON, ok := userlib.DatastoreGet(id)
 	if !ok {
-	// 	return nil, errors.New(strings.ToTitle("file not found"))
+		return errors.New(strings.ToTitle("file not found"))
 	}
 	json.Unmarshal(dataJSON, &sentinel)
 	getFile(&filedata, sentinel.ID)
