@@ -381,7 +381,27 @@ var _ = Describe("Client Tests", func() {
 
 		})
 
-		
+		Specify("Get things that don't exist", func() {
+			userlib.DebugMsg("Getting user Alice.")
+			alice, err = client.GetUser("alice", defaultPassword)
+			Expect(err == nil).To(Equal(false))
+
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Incorrect Password")
+			_, err := client.GetUser("alice", "Lol")
+			Expect(err == nil).To(Equal(false))
+
+			userlib.DebugMsg("Loading fake file...")
+			_, err = alice.LoadFile(aliceFile)
+			Expect(err == nil).To(Equal(false))
+		})
+
+
+
+
 
 
 
