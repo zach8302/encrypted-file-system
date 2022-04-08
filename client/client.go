@@ -112,6 +112,9 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	salt := userdata.Salts["userMAC"]
 	key := userlib.Argon2Key([]byte(password), salt, uint32(16))
 	enc := userdata.EncKeys["userMAC"]
+	if enc == nil {
+		return nil, errors.New(strings.ToTitle("decryption failure"))
+	}
 	macKey := userlib.SymDec(key, enc)
 	combined := combineUserData(&userdata)
 	userdata.UserMAC, err = userlib.HMACEval(macKey, combined)
@@ -224,6 +227,9 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	salt := userdata.Salts["userMAC"]
 	key := userlib.Argon2Key([]byte(password), salt, uint32(16))
 	enc := userdata.EncKeys["userMAC"]
+	if enc == nil {
+		return nil, errors.New(strings.ToTitle("decryption failure"))
+	}
 	macKey := userlib.SymDec(key, enc)
 	combined := combineUserData(&userdata)
 	mac2, err := userlib.HMACEval(macKey, combined)
@@ -254,6 +260,9 @@ func unpackUserValues(userdata *User, password string) {
 		salt := userdata.Salts[val]
 		key := userlib.Argon2Key([]byte(password), salt, uint32(16))
 		enc := userdata.EncKeys[val]
+		if enc == nil {
+			//error
+		}
 		store := userlib.SymDec(key, enc)
 		userdata.Stored[val] = store
 	}
@@ -275,7 +284,7 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		if sentinel.IsFile {
 			key = userdata.Stored["file"]
 			getFile(&filedata, sentinel.ID)
-			updateFile(userdata, &filedata, filename, content, key)
+			updateFile(userdata, &filedata, filename, content, key, false, nil)
 			serial, err := json.Marshal(filedata)
 			if err != nil {
 				return errors.New(strings.ToTitle("Internal Error"))
@@ -292,7 +301,7 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 				return errors.New(strings.ToTitle("Not allowed to access"))
 			}
 			getFile(&filedata, shared.FileID)	
-			updateFile(userdata, &filedata, filename, content, key)
+			updateFile(userdata, &filedata, filename, content, key, true, shared.SharedKey)
 			serial, err := json.Marshal(filedata)
 			if err != nil {
 				return errors.New(strings.ToTitle("Internal Error"))
@@ -361,6 +370,9 @@ func createFile(userdata *User, filedata *File, filename string, content []byte,
 	if shared {
 		key = pos
 	} else {
+		if filedata.OwnerKey == nil {
+			return errors.New(strings.ToTitle("decryption failure"))
+		}
 		key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
 	}
 	fileKey, name, mac := getFileKeys(filedata, key)
@@ -378,8 +390,13 @@ func createFile(userdata *User, filedata *File, filename string, content []byte,
 	return nil
 }
 
-func updateFile(userdata *User, filedata *File, filename string, content []byte, key []byte) {
-	owner := userlib.SymDec(key, filedata.OwnerKey)
+func updateFile(userdata *User, filedata *File, filename string, content []byte, key []byte, shared bool, pos []byte) {
+	var owner []byte
+	if !shared{
+		owner = userlib.SymDec(key, filedata.OwnerKey)
+	} else {
+		owner = key
+	}
 	fileKey, nameKey, macKey := getFileKeys(filedata, owner)
 
 	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
@@ -392,6 +409,7 @@ func updateFile(userdata *User, filedata *File, filename string, content []byte,
 	fileValues := string(filedata.Filename) + string(filedata.Contents)
 	
 	filedata.MAC, _ = userlib.HMACEval(macKey, []byte(fileValues))
+	filedata.Next, _ = uuid.FromBytes([]byte("nil"))
 
 }
 
@@ -590,6 +608,9 @@ func decryptFile(userdata *User, filename string, file uuid.UUID, shared bool, p
 		if shared {
 			key = pos
 		} else {
+			if filedata.OwnerKey == nil {
+				return nil, errors.New(strings.ToTitle("decryption failure"))
+			}
 			key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
 		}
 		fileKey, _, mac := getFileKeys(&filedata, key)
