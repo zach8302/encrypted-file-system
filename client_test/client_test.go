@@ -539,6 +539,41 @@ var _ = Describe("Client Tests", func() {
 
 		})
 
+		Specify("Try to open file before accepting invite", func() {
+			userlib.DebugMsg("Initializing users Alice (aliceDesktop) and Bob.")
+			aliceDesktop, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			bob, err = client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			
+
+			userlib.DebugMsg("Getting second instance of Alice - aliceLaptop")
+			aliceLaptop, err = client.GetUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceDesktop storing file %s with content: %s", aliceFile, contentOne)
+			err = aliceDesktop.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceDesktop loading file %s with content: %s", aliceFile, contentOne)
+			_, err = aliceDesktop.LoadFile(aliceFile)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
+			_, err := aliceLaptop.CreateInvitation(aliceFile, "bob")
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Bob tries to access")
+			_, err = bob.LoadFile(aliceFile)
+			Expect(err != nil).To(Equal(true))
+
+		})
+
+		
+
+
 		//empty password
 
 		
