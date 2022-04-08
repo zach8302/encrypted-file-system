@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	// Useful for formatting strings (e.g. `fmt.Sprintf`).
-	"fmt"
+	//"fmt"
 
 	// Useful for creating new error messages to return using errors.New("...")
 	"errors"
@@ -57,8 +57,9 @@ type File struct {
 	Next uuid.UUID
 	Last uuid.UUID
 	OwnerKey []byte
-	SharedKey []byte
-	UnlockKey []byte
+	MacKey []byte
+	NameKey []byte
+	FileKey []byte
 	Filename, Contents, MAC, Owner []byte
 	ID uuid.UUID
 	TreeID uuid.UUID
@@ -333,7 +334,7 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 }
 
 func copyKeys(to *File, from *File) {
-	to.OwnerKey, to.SharedKey, to.UnlockKey = from.OwnerKey, from.SharedKey, from.UnlockKey
+	to.OwnerKey, to.MacKey, to.FileKey, to.NameKey = from.OwnerKey, from.MacKey, from.FileKey, from.NameKey
 }
 
 func createFile(userdata *User, filedata *File, filename string, content []byte, shared bool, pos []byte, append bool, prev *File) (error) {
@@ -345,6 +346,7 @@ func createFile(userdata *User, filedata *File, filename string, content []byte,
 	} else {
 		generateFileKeys(userdata, filedata)
 		var tree TreeNode
+		tree.Username = userdata.Username
 		serial, err := json.Marshal(tree)
 		if err != nil {
 			return errors.New(strings.ToTitle("Internal Error"))
@@ -361,33 +363,34 @@ func createFile(userdata *User, filedata *File, filename string, content []byte,
 	} else {
 		key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
 	}
+	fileKey, name, mac := getFileKeys(filedata, key)
+	validateFile(mac, filedata.Filename, filedata.Contents, filedata.MAC)
 	
-	enc := userlib.SymEnc(key, userlib.RandomBytes(16), content)
+	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
 	filedata.Contents = enc
 
-	enc = userlib.SymEnc(key, userlib.RandomBytes(16), ([]byte)(filename))
+	enc = userlib.SymEnc(name, userlib.RandomBytes(16), ([]byte)(filename))
 	filedata.Filename = enc
 	//calculate the mac
-	
-	fileValues := filename + string(content)
-	fmt.Println(fileValues)
-	filedata.MAC, _ = userlib.HMACEval(key, []byte(fileValues))
+	fileValues := string(filedata.Filename) + string(filedata.Contents)
+	filedata.MAC, _ = userlib.HMACEval(mac, []byte(fileValues))
 
 	return nil
 }
 
 func updateFile(userdata *User, filedata *File, filename string, content []byte, key []byte) {
-	fileKey := userlib.SymDec(key, filedata.OwnerKey)
+	owner := userlib.SymDec(key, filedata.OwnerKey)
+	fileKey, nameKey, macKey := getFileKeys(filedata, owner)
+
 	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
 	filedata.Contents = enc
 
-	nameKey := userlib.SymDec(key, filedata.OwnerKey)
+
 	enc = userlib.SymEnc(nameKey, userlib.RandomBytes(16), ([]byte)(filename))
 	filedata.Filename = enc
 	//calculate the mac
-	fileValues := filename + string(content)
-	fmt.Println(fileValues)
-	macKey := userlib.SymDec(key, filedata.OwnerKey)
+	fileValues := string(filedata.Filename) + string(filedata.Contents)
+	
 	filedata.MAC, _ = userlib.HMACEval(macKey, []byte(fileValues))
 
 }
@@ -402,12 +405,14 @@ func generateFileKeys(userdata *User, filedata *File) {
 	filedata.OwnerKey = userlib.SymEnc(key, userlib.RandomBytes(16), owner)
 	filedata.Owner = userlib.SymEnc(owner, userlib.RandomBytes(16), []byte(userdata.Username))
 
-
-	reason = userlib.RandomBytes(16)
-	derived, _ = userlib.HashKDF(key, reason)
 	slice := derived[16:32]
-	filedata.UnlockKey = userlib.SymEnc(key, userlib.RandomBytes(16), slice)
-	filedata.SharedKey = userlib.SymEnc(slice, userlib.RandomBytes(16), owner)
+	filedata.MacKey = userlib.SymEnc(owner, userlib.RandomBytes(16), slice)
+
+	name := derived[32:48]
+	filedata.NameKey = userlib.SymEnc(owner, userlib.RandomBytes(16), name)
+
+	content := derived[48:]
+	filedata.FileKey = userlib.SymEnc(owner, userlib.RandomBytes(16), content)
 
 }
 
@@ -451,8 +456,15 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	return nil
 }
 
+func getFileKeys(filedata *File, key []byte) ([]byte, []byte, []byte) {
+	file := userlib.SymDec(key, filedata.FileKey)
+	name := userlib.SymDec(key, filedata.NameKey)
+	mac := userlib.SymDec(key, filedata.MacKey)
+
+	return file, name, mac
+}
+
 func ownerAppend(userdata *User, filename string, content []byte, id uuid.UUID, shared bool, pos []byte) error{
-	oldContent, _ := userdata.LoadFile(filename)
 	dataJSON, ok := userlib.DatastoreGet(id)
 
 	if !ok {
@@ -471,13 +483,10 @@ func ownerAppend(userdata *User, filename string, content []byte, id uuid.UUID, 
 
 	//Create the file struct
 	var appendFile File
-	var key []byte
 	if !shared {
 		createFile(userdata, &appendFile, filename, content, false, nil, true, &lastFile)
-		key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
 	} else {
 		createFile(userdata, &appendFile, filename, content, true, pos, true, &lastFile)
-		key = pos
 	}
 	//add to the end
 	lastUUID := uuid.New()
@@ -496,11 +505,6 @@ func ownerAppend(userdata *User, filename string, content []byte, id uuid.UUID, 
 		serial, _ = json.Marshal(lastFile)
 		userlib.DatastoreSet(lastFile.ID, serial)
 	}
-
-
-	fileValues := filename + string(oldContent) + string(content)
-	fmt.Println(fileValues)
-	filedata.MAC, _ = userlib.HMACEval(key, []byte(fileValues))
 
 	serial, _ = json.Marshal(filedata)
 	userlib.DatastoreSet(filedata.ID, serial)
@@ -528,6 +532,7 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 		if err != nil {
 			return nil, errors.New(strings.ToTitle("Internal Error 2"))
 		}
+		
 
 	} else {
 		getShared(&shared, sentinel.ID)
@@ -541,20 +546,6 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 			return nil, errors.New(strings.ToTitle("Internal Error 1"))
 		}
 	}
-	var filedata File
-	getFile(&filedata, id)
-	var key []byte
-	if sentinel.IsFile {
-		key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
-	} else {
-		key, _ = getSharedKey(userdata, &shared)
-	}
-	name := userlib.SymDec(key, filedata.Filename)
-	ok = validateFile(key, string(name), content, filedata.MAC)
-	if !ok {
-		return nil, errors.New(strings.ToTitle("Data integrity error"))
-	}
-
 	return content, err
 }
 
@@ -566,9 +557,8 @@ func getFile(filedata *File, id uuid.UUID) {
 	json.Unmarshal(dataJSON, &filedata)
 }
 
-func validateFile(key []byte, filename string, content []byte, mac []byte) (bool) {
-	fileValues := filename + string(content)
-	fmt.Println(fileValues)
+func validateFile(key []byte, filename []byte, content []byte, mac []byte) (bool) {
+	fileValues := string(filename) + string(content)
 	new, _ := userlib.HMACEval(key, []byte(fileValues))
 	return userlib.HMACEqual(mac, new)
 }
@@ -602,8 +592,10 @@ func decryptFile(userdata *User, filename string, file uuid.UUID, shared bool, p
 		} else {
 			key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
 		}
+		fileKey, _, mac := getFileKeys(&filedata, key)
+		validateFile(mac, filedata.Filename, filedata.Contents, filedata.MAC)
 		//decrypt the contents
-		content += string(userlib.SymDec(key, filedata.Contents))
+		content += string(userlib.SymDec(fileKey, filedata.Contents))
 
 		file = filedata.Next
 	}
@@ -613,7 +605,7 @@ func decryptFile(userdata *User, filename string, file uuid.UUID, shared bool, p
 
 func (userdata *User) CreateInvitation(filename string, recipientUsername string) (invitationPtr uuid.UUID, err error) {
 	//todo integrity
-
+	invId := uuid.New()
 	loc := userdata.Username + "/" + filename
 	locHash := userlib.Hash([]byte(loc))
 	id, _ := uuid.FromBytes(locHash[:16])
@@ -642,6 +634,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 
 		tree.Children = x
 		newTree.Username = recipientUsername
+		newTree.Invite = invId
 
 
 		serial, _ := json.Marshal(tree)
@@ -666,9 +659,19 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, shared)
 		invitation.Filename, _ = userlib.PKEEnc(name, []byte(filename))
 		invitation.TreeID = treeId
+		encSig := userdata.Stored["DSA"]
+		var sig userlib.DSSignKey
+		json.Unmarshal(encSig, &sig)
+		verify, err := userlib.DSSign(sig, []byte(filename))
+		if err != nil {
+			return uuid.New(), errors.New(strings.ToTitle("Signature error"))
+		}
+		invitation.Signature = verify
+
+
 
 		serial, _ = json.Marshal(invitation)
-		id = uuid.New()
+		id = invId
 		userlib.DatastoreSet(id, serial)
 		return id, nil
 	} else {
@@ -708,13 +711,22 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, key)
 		invitation.Filename, _ = userlib.PKEEnc(name, []byte(filename))
 		invitation.TreeID = treeId
+		encSig := userdata.Stored["DSA"]
+		var sig userlib.DSSignKey
+		json.Unmarshal(encSig, &sig)
+		verify, err := userlib.DSSign(sig, []byte(filename))
+		if err != nil {
+			return uuid.New(), errors.New(strings.ToTitle("Signature error"))
+		}
+		invitation.Signature = verify
 		
-		id = uuid.New()
+		id = invId
 		tree.Invite = id
 		serial, _ = json.Marshal(tree)
 		userlib.DatastoreSet(shared.TreeID, serial)
 		serial, _ = json.Marshal(invitation)
 		userlib.DatastoreSet(id, serial)
+
 		return id, nil
 	}
 	
@@ -753,11 +765,24 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	shared.SharedKey = invite.SharedKey
 	shared.Username = userdata.Username
 	shared.TreeID = invite.TreeID
-	serial := userdata.Stored["RSAFile"]
+	serial := userdata.Stored["RSAFilename"]
 	var priv userlib.PKEDecKey
 	json.Unmarshal(serial, &priv)
-	name, _ := userlib.PKEDec(priv, invite.Filename)
+	name, err := userlib.PKEDec(priv, invite.Filename)
+	if err != nil {
+		return errors.New(strings.ToTitle("Decryption Error"))
+	}
 
+	vk, ok := userlib.KeystoreGet(senderUsername + "/" + "DSA")
+	if !ok {
+		return errors.New(strings.ToTitle("Internal Error"))
+	}
+
+
+	err = userlib.DSVerify(vk, []byte(name), invite.Signature)
+	if err != nil {
+		return errors.New(strings.ToTitle("Cannot verify sender"))
+	}
 
 
 	loc := senderUsername + "/" + string(name)
@@ -766,7 +791,7 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	var oldSentinel FileSentinel
 	dataJSON, ok = userlib.DatastoreGet(fileLoc)
 	if !ok {
-	// 	return nil, errors.New(strings.ToTitle("file not found"))
+		return errors.New(strings.ToTitle("file not found"))
 	}
 	json.Unmarshal(dataJSON, &oldSentinel)
 
@@ -825,6 +850,12 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	}
 	pruneTree(x)
 
+	reencryptFile(userdata, filename, filedata.TreeID)
+	err := reshareFile(userdata, filename, filedata.TreeID)
+	if err != nil {
+		return errors.New(strings.ToTitle("ReshareError"))
+	}
+
 
 	return nil
 }
@@ -869,7 +900,8 @@ func pruneTree(tree uuid.UUID) (error) {
 		id := q[i]
 		data, ok := userlib.DatastoreGet(id)
 		if !ok {
-			return errors.New(strings.ToTitle("Internal Error"))
+			i += 1
+			continue
 		}
 		json.Unmarshal(data, &node)
 		for _, child := range node.Children {
@@ -921,18 +953,24 @@ func reshareFile(userdata *User, filename string, tree uuid.UUID) (error) {
 	getFile(&filedata, sentinel.ID)
 
 	key := userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
+
 	var node TreeNode
 	for i < len(q) {
 		id := q[i]
 		data, ok := userlib.DatastoreGet(id)
-		if !ok {
-			return errors.New(strings.ToTitle("Internal Error"))
+		if !ok{
+			i += 1
+			continue
+			
 		}
 		json.Unmarshal(data, &node)
 		for _, child := range node.Children {
 			q = append(q, child)
 
-
+		}
+		if i ==0 {
+			i +=1
+			continue
 		}
 
 		pub, ok := userlib.KeystoreGet(node.Username + "/" + "RSAFile")
@@ -942,17 +980,18 @@ func reshareFile(userdata *User, filename string, tree uuid.UUID) (error) {
 		}
 
 		if !node.Accepted {
-			updateInvite(userdata, id, encKey)
+			updateInvite(userdata, id, encKey, sentinel.ID)
 		} else {
-			updateSharedFile(userdata, id, encKey)
+			updateSharedFile(userdata, id, encKey, sentinel.ID)
 		}
 		i += 1
 	}
+
 	return nil
 
 }
 
-func updateSharedFile(userdata *User, tree uuid.UUID, key []byte) (error) {
+func updateSharedFile(userdata *User, tree uuid.UUID, key []byte, loc uuid.UUID) (error) {
 	var node TreeNode
 	data, ok := userlib.DatastoreGet(tree)
 	if !ok {
@@ -962,6 +1001,8 @@ func updateSharedFile(userdata *User, tree uuid.UUID, key []byte) (error) {
 	var shared SharedFile
 	getShared(&shared, node.Shared)
 	shared.SharedKey = key
+	shared.FileID = loc
+
 	serial, _ := json.Marshal(shared)
 	userlib.DatastoreSet(node.Shared, serial)
 
@@ -969,7 +1010,7 @@ func updateSharedFile(userdata *User, tree uuid.UUID, key []byte) (error) {
 
 }
 
-func updateInvite(userdata *User, tree uuid.UUID, key []byte) (error){
+func updateInvite(userdata *User, tree uuid.UUID, key []byte, loc uuid.UUID) (error){
 	var node TreeNode
 	data, ok := userlib.DatastoreGet(tree)
 	if !ok {
@@ -983,6 +1024,8 @@ func updateInvite(userdata *User, tree uuid.UUID, key []byte) (error){
 	}
 	json.Unmarshal(data, &invite)
 	invite.SharedKey = key
+
+
 	serial, _ := json.Marshal(invite)
 	userlib.DatastoreSet(node.Invite, serial)
 
