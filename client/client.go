@@ -92,6 +92,9 @@ type FileSentinel struct {
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
 	//create a user struct
+	if len(username) < 1 {
+		return nil, errors.New(strings.ToTitle("Invalid username"))
+	}
 	nameHash := userlib.Hash([]byte(username))
 	id, err := uuid.FromBytes(nameHash[:16])
 	if err != nil {
@@ -333,7 +336,7 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		
 		serial, err = json.Marshal(sentinel)
 		if err != nil {
-				return errors.New(strings.ToTitle("Internal Error"))
+			return errors.New(strings.ToTitle("Internal Error"))
 		}
 
 
@@ -800,11 +803,21 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	var invite Invitation
 	var shared SharedFile
 	var sentinel FileSentinel
+
+	oldLoc := userdata.Username + "/" + filename
+	oldHash := userlib.Hash([]byte(oldLoc))
+	oldID, _ := uuid.FromBytes(oldHash[:16])
+	_, ok := userlib.DatastoreGet(oldID)
+	if ok {
+		return errors.New(strings.ToTitle("File already exists"))
+	}
+
 	dataJSON, ok := userlib.DatastoreGet(invitationPtr)
 	if !ok {
-		return errors.New(strings.ToTitle("file not found"))
+		return errors.New(strings.ToTitle("invite not found"))
 	}
 	json.Unmarshal(dataJSON, &invite)
+
 
 	enc := invite.MacKey
 	serial := userdata.Stored["RSAInviteMac"]
