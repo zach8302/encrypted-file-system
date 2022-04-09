@@ -787,6 +787,76 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 		})
 
+		Specify("Invite Swap", func() {
+			userlib.DebugMsg("Initializing users Alice (aliceDesktop) and Bob.")
+			aliceDesktop, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			bob, err = client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			kaleb, err := client.InitUser("kaleb", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Getting second instance of Alice - aliceLaptop")
+			aliceLaptop, err = client.GetUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceDesktop storing file %s with content: %s", aliceFile, contentOne)
+			err = aliceDesktop.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Kaleb storing file %s with content: %s")
+			err = kaleb.StoreFile("bad", []byte("I love naz"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceDesktop loading file %s with content: %s", aliceFile, contentOne)
+			_, err = aliceDesktop.LoadFile(aliceFile)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
+			invite, err := aliceLaptop.CreateInvitation(aliceFile, "bob")
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("kaleb creating invite for Bob.")
+			invite2, err := kaleb.CreateInvitation("bad", "bob")
+			Expect(err).To(BeNil())
+
+
+
+			m := userlib.DatastoreGetMap()
+			data := m[invite2]
+			m[invite] = data
+
+			userlib.DebugMsg("Bob accepting invite from Alice under filename %s.", bobFile)
+			err = bob.AcceptInvitation("alice", invite, bobFile)
+			Expect(err == nil).To(Equal(false))
+
+		})
+
+		Specify("User tamper", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			m := userlib.DatastoreGetMap()
+			var x uuid.UUID
+			var y []byte
+			for i, v := range m {
+				x = i
+				y = v
+			}
+			y[100] = byte(0)
+			m[x] = y
+
+
+			userlib.DebugMsg("Getting user Alice.")
+			aliceLaptop, err = client.GetUser("alice", defaultPassword)
+			Expect(err==nil).To(Equal(false))
+		})
+
+
+
 
 
 

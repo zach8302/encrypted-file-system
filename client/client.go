@@ -75,6 +75,7 @@ type SharedFile struct {
 type Invitation struct {
 	OwnerReceiver []byte
 	SharedKey []byte
+	MacKey []byte
 	Filename []byte
 	Signature []byte
 	Mac []byte
@@ -136,7 +137,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 func combineUserData(userdata *User) []byte {
 	var combined string = ""
-	names := [11]string  {"file", "fileMac", "treeKey", "treeMac", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "share", "DSA"}
+	names := [11]string  {"file", "fileMac", "treeKey", "RSAInviteMac", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "share", "DSA"}
 	for _, val := range names {
 		salt := userdata.Salts[val]
 		enc := userdata.EncKeys[val]
@@ -149,7 +150,7 @@ func combineUserData(userdata *User) []byte {
 
 }
 func generateUserSalts(userdata *User) {
-	names := [12]string  {"file", "fileMac", "treeKey", "treeMac", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "share", "password", "DSA"}
+	names := [12]string  {"file", "fileMac", "treeKey", "RSAInviteMac", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "share", "password", "DSA"}
 	set := make(map[string]bool)
 	for _, val := range names {
 		salt := userlib.RandomBytes(8)
@@ -163,8 +164,8 @@ func generateUserSalts(userdata *User) {
 }
 
 func generateUserKeys(userdata *User, password []byte) (error){
-	names := [6]string  {"file", "fileMac", "treeKey", "treeMac", "share", "userMAC"}
-	rsaNames := [4]string {"RSAFile", "RSAMac", "RSAFilename", "RSATreeNode"}
+	names := [6]string  {"file", "fileMac", "treeKey", "share", "userMAC"}
+	rsaNames := [5]string {"RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "RSAInviteMac"}
 
 	keyLen := 16
 
@@ -255,7 +256,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 }
 
 func unpackUserValues(userdata *User, password string) {
-	names := [11]string  {"file", "fileMac", "treeKey", "treeMac", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "share", "DSA"}
+	names := [11]string  {"file", "fileMac", "treeKey", "RSAInviteMac", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "share", "DSA"}
 	for _, val := range names {
 		salt := userdata.Salts[val]
 		key := userlib.Argon2Key([]byte(password), salt, uint32(16))
@@ -636,6 +637,14 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	}
 	var sentinel FileSentinel
 	json.Unmarshal(data, &sentinel)
+	macPub, ok := userlib.KeystoreGet(recipientUsername + "/" + "RSAInviteMac")
+	if !ok {
+		return uuid.New(), errors.New(strings.ToTitle("Internal Error"))
+	}
+	key := userdata.Stored["userMAC"]
+	reason := userlib.RandomBytes(16)
+	derived, _ := userlib.HashKDF(key, reason)
+	derived = derived[:16]
 
 
 	if sentinel.IsFile {
@@ -679,6 +688,14 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		var invitation Invitation
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, shared)
 		invitation.Filename, _ = userlib.PKEEnc(name, []byte(filename))
+
+		invitation.MacKey, _ = userlib.PKEEnc(macPub, derived)
+		invData := string(invitation.SharedKey) + string(invitation.Filename) + string(invitation.MacKey)
+		invitation.Mac, err = userlib.HMACEval(derived, []byte(invData))
+		if err != nil {
+			return uuid.New(), errors.New(strings.ToTitle("Internal Error"))
+		}
+
 		invitation.TreeID = treeId
 		encSig := userdata.Stored["DSA"]
 		var sig userlib.DSSignKey
@@ -731,6 +748,12 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		var invitation Invitation
 		invitation.SharedKey, _ = userlib.PKEEnc(pub, key)
 		invitation.Filename, _ = userlib.PKEEnc(name, []byte(filename))
+		invitation.MacKey, _ = userlib.PKEEnc(macPub, derived)
+		invData := string(invitation.SharedKey) + string(invitation.Filename) + string(invitation.MacKey)
+		invitation.Mac, err = userlib.HMACEval(derived, []byte(invData))
+		if err != nil {
+			return uuid.New(), errors.New(strings.ToTitle("Internal Error"))
+		}
 		invitation.TreeID = treeId
 		encSig := userdata.Stored["DSA"]
 		var sig userlib.DSSignKey
@@ -783,11 +806,23 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	}
 	json.Unmarshal(dataJSON, &invite)
 
+	enc := invite.MacKey
+	serial := userdata.Stored["RSAInviteMac"]
+	var priv userlib.PKEDecKey
+	json.Unmarshal(serial, &priv)
+	macKey, _ := userlib.PKEDec(priv, enc)
+	invData := string(invite.SharedKey) + string(invite.Filename) + string(invite.MacKey)
+	mac, err := userlib.HMACEval(macKey, []byte(invData))
+	validMAC := userlib.HMACEqual(mac, invite.Mac)
+	if !validMAC {
+		return errors.New(strings.ToTitle("Data Integrity Error"))
+	}
+
+
 	shared.SharedKey = invite.SharedKey
 	shared.Username = userdata.Username
 	shared.TreeID = invite.TreeID
-	serial := userdata.Stored["RSAFilename"]
-	var priv userlib.PKEDecKey
+	serial = userdata.Stored["RSAFilename"]
 	json.Unmarshal(serial, &priv)
 	name, err := userlib.PKEDec(priv, invite.Filename)
 	if err != nil {
@@ -1032,6 +1067,10 @@ func updateSharedFile(userdata *User, tree uuid.UUID, key []byte, loc uuid.UUID)
 }
 
 func updateInvite(userdata *User, tree uuid.UUID, key []byte, loc uuid.UUID) (error){
+	mac := userdata.Stored["userMAC"]
+	reason := userlib.RandomBytes(16)
+	derived, _ := userlib.HashKDF(mac, reason)
+	derived = derived[:16]
 	var node TreeNode
 	data, ok := userlib.DatastoreGet(tree)
 	if !ok {
@@ -1045,6 +1084,15 @@ func updateInvite(userdata *User, tree uuid.UUID, key []byte, loc uuid.UUID) (er
 	}
 	json.Unmarshal(data, &invite)
 	invite.SharedKey = key
+
+	macPub, ok := userlib.KeystoreGet(node.Username + "/" + "RSAInviteMac")
+	if !ok {
+		return errors.New(strings.ToTitle("Internal Error"))
+	}
+
+	invite.MacKey, _ = userlib.PKEEnc(macPub, derived)
+	invData := string(invite.SharedKey) + string(invite.Filename) + string(invite.MacKey)
+	invite.Mac, _ = userlib.HMACEval(derived, []byte(invData))
 
 
 	serial, _ := json.Marshal(invite)
