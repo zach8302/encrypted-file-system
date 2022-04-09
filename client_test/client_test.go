@@ -197,6 +197,9 @@ var _ = Describe("Client Tests", func() {
 			charles, err = client.InitUser("charles", defaultPassword)
 			Expect(err).To(BeNil())
 
+			david, err := client.InitUser("david", defaultPassword)
+			Expect(err).To(BeNil())
+
 			userlib.DebugMsg("Alice storing file %s with content: %s", aliceFile, contentOne)
 			alice.StoreFile(aliceFile, []byte(contentOne))
 
@@ -206,6 +209,9 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			err = bob.AcceptInvitation("alice", invite, bobFile)
+			Expect(err).To(BeNil())
+
+			davite, err := bob.CreateInvitation(bobFile, "david")
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Checking that Alice can still load the file.")
@@ -252,6 +258,9 @@ var _ = Describe("Client Tests", func() {
 
 			err = charles.AppendToFile(charlesFile, []byte(contentTwo))
 			Expect(err).ToNot(BeNil())
+
+			err = david.AcceptInvitation("bob", davite, "poop")
+			Expect(err==nil).To(Equal(false))
 
 		})
 
@@ -423,15 +432,36 @@ var _ = Describe("Client Tests", func() {
 			alice, err = client.InitUser("alice", defaultPassword)
 			Expect(err).To(BeNil())
 
+			userlib.DebugMsg("Initializing user Bob.")
+			bob, err = client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
 			userlib.DebugMsg("Storing file data: %s", contentOne)
 			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+
+			userlib.DebugMsg("Appending file data: %s", contentTwo)
+			err = alice.AppendToFile(aliceFile, []byte(contentTwo))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Appending file data: %s", contentThree)
+			err = alice.AppendToFile(aliceFile, []byte(contentThree))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
+			invite, err := alice.CreateInvitation(aliceFile, "bob")
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Bob accepting invite from Alice under filename %s.", bobFile)
+			err = bob.AcceptInvitation("alice", invite, bobFile)
 			Expect(err).To(BeNil())
 
 			m := userlib.DatastoreGetMap()
 			var x bool
 			s := contentOne
 			for _, v := range m {
-				if strings.Contains(string(v), s) {
+				if strings.Contains(string(v), s) || strings.Contains(string(v), aliceFile) {
 					x = true
 					break
 				} else {
