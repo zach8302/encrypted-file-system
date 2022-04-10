@@ -60,6 +60,7 @@ type File struct {
 	MacKey []byte
 	NameKey []byte
 	FileKey []byte
+	Signature []byte
 	Filename, Contents, MAC, Owner []byte
 	ID uuid.UUID
 	TreeID uuid.UUID
@@ -380,7 +381,6 @@ func createFile(userdata *User, filedata *File, filename string, content []byte,
 		key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
 	}
 	fileKey, name, mac := getFileKeys(filedata, key)
-	validateFile(mac, filedata.Filename, filedata.Contents, filedata.MAC)
 	
 	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
 	filedata.Contents = enc
@@ -391,10 +391,20 @@ func createFile(userdata *User, filedata *File, filename string, content []byte,
 	fileValues := string(filedata.Filename) + string(filedata.Contents)
 	filedata.MAC, _ = userlib.HMACEval(mac, []byte(fileValues))
 
+	encSig := userdata.Stored["DSA"]
+	var sig userlib.DSSignKey
+	json.Unmarshal(encSig, &sig)
+	verify, err := userlib.DSSign(sig, []byte(filedata.MAC))
+	if err != nil {
+		return errors.New(strings.ToTitle("Signature error"))
+	}
+	filedata.Signature = verify
+
+
 	return nil
 }
 
-func updateFile(userdata *User, filedata *File, filename string, content []byte, key []byte, shared bool, pos []byte) {
+func updateFile(userdata *User, filedata *File, filename string, content []byte, key []byte, shared bool, pos []byte){
 	var owner []byte
 	if !shared{
 		owner = userlib.SymDec(key, filedata.OwnerKey)
@@ -403,16 +413,23 @@ func updateFile(userdata *User, filedata *File, filename string, content []byte,
 	}
 	fileKey, nameKey, macKey := getFileKeys(filedata, owner)
 
+	name := userlib.SymDec(nameKey, filedata.Filename)
+
 	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
 	filedata.Contents = enc
 
 
-	enc = userlib.SymEnc(nameKey, userlib.RandomBytes(16), ([]byte)(filename))
+	enc = userlib.SymEnc(nameKey, userlib.RandomBytes(16), ([]byte)(name))
 	filedata.Filename = enc
 	//calculate the mac
 	fileValues := string(filedata.Filename) + string(filedata.Contents)
 	
 	filedata.MAC, _ = userlib.HMACEval(macKey, []byte(fileValues))
+	encSig := userdata.Stored["DSA"]
+	var sig userlib.DSSignKey
+	json.Unmarshal(encSig, &sig)
+	verify, _ := userlib.DSSign(sig, []byte(filedata.MAC))
+	filedata.Signature = verify
 	filedata.Next, _ = uuid.FromBytes([]byte("nil"))
 
 }
@@ -579,10 +596,20 @@ func getFile(filedata *File, id uuid.UUID) {
 	json.Unmarshal(dataJSON, &filedata)
 }
 
-func validateFile(key []byte, filename []byte, content []byte, mac []byte) (bool) {
+func validateFile(key []byte, filename []byte, sign []byte, owner []byte, content []byte, mac []byte, isSign bool) (bool, error) {
 	fileValues := string(filename) + string(content)
 	new, _ := userlib.HMACEval(key, []byte(fileValues))
-	return userlib.HMACEqual(mac, new)
+	if isSign {
+		vk, ok := userlib.KeystoreGet(string(owner) + "/" + "DSA")
+		if !ok {
+			return false, errors.New(strings.ToTitle("Internal Error"))
+		}
+		err := userlib.DSVerify(vk, []byte(mac), sign)
+		if err != nil {
+			return false, errors.New(strings.ToTitle("Cannot verify sender"))
+		}
+	}
+	return userlib.HMACEqual(mac, new), nil
 }
 
 func getShared(filedata *SharedFile, id uuid.UUID) {
@@ -606,6 +633,23 @@ func decryptFile(userdata *User, filename string, file uuid.UUID, shared bool, p
 	var content string = ""
 	var filedata File
 	empty, _ := uuid.FromBytes([]byte("nil"))
+	getFile(&filedata, file)
+	var ki []byte
+	if shared {
+		ki = pos
+	} else {
+		if filedata.OwnerKey == nil {
+			return nil, errors.New(strings.ToTitle("decryption failure"))
+		}
+		ki = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
+	}
+	nameKey := userlib.SymDec(ki, filedata.NameKey)
+	name := userlib.SymDec(nameKey, filedata.Filename)
+	if !shared && string(name) != filename {
+		return nil, errors.New(strings.ToTitle("Data Integrity error"))
+	}
+	_, _, mac := getFileKeys(&filedata, ki)
+	validateFile(mac, filedata.Filename, filedata.Signature, filedata.Owner, filedata.Contents, filedata.MAC, true)
 	for file != empty {
 		getFile(&filedata, file)
 		var key []byte
@@ -618,7 +662,10 @@ func decryptFile(userdata *User, filename string, file uuid.UUID, shared bool, p
 			key = userlib.SymDec(userdata.Stored["file"], filedata.OwnerKey)
 		}
 		fileKey, _, mac := getFileKeys(&filedata, key)
-		validateFile(mac, filedata.Filename, filedata.Contents, filedata.MAC)
+		ok, err := validateFile(mac, filedata.Filename, filedata.Signature, filedata.Owner, filedata.Contents, filedata.MAC, false)
+		if !ok || err != nil {
+			return nil, errors.New(strings.ToTitle("Data Integrity Error"))
+		}
 		//decrypt the contents
 		content += string(userlib.SymDec(fileKey, filedata.Contents))
 

@@ -86,6 +86,68 @@ var _ = Describe("Client Tests", func() {
 
 	Describe("Basic Tests", func() {
 
+		Specify("File swap", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", "TRICK")
+			err = alice.StoreFile("tricky", []byte("TRICK"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			m := userlib.DatastoreGetMap()
+			var y []byte
+			first := true
+			for i, v := range m {
+				fmt.Println(i)
+				if strings.Contains(string(v), "Next") {
+					if first {
+						y = v
+						first = false
+					} else {
+						m[i] = y
+					}
+				}
+			}
+
+			userlib.DebugMsg("Loading file...")
+			_, err := alice.LoadFile(aliceFile)
+			userlib.DebugMsg("Loading file...")
+			_, err2 := alice.LoadFile("tricky")
+			Expect(err==nil&&err2 ==nil).To(Equal(false))
+		})
+
+		Specify("User swap", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing user Mike.")
+			alice, err = client.InitUser("mike", defaultPassword)
+			Expect(err).To(BeNil())
+			
+
+			m := userlib.DatastoreGetMap()
+			var y []byte
+			first := true
+			for i, v := range m {
+				if first {
+					y = v
+					first = false
+				}
+				m[i] = y
+			}
+
+			userlib.DebugMsg("Getting user Mike.")
+			_, err = client.InitUser("mike", defaultPassword)
+			Expect(err==nil).To(Equal(false))
+
+		})
+
 		Specify("Empty user", func() {
 			userlib.DebugMsg("Initializing user Alice.")
 			alice, err = client.InitUser("alice", defaultPassword)
@@ -1074,6 +1136,8 @@ var _ = Describe("Client Tests", func() {
 
 	
 		})
+
+		
 
 
 
