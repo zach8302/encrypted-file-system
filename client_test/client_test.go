@@ -1218,7 +1218,7 @@ var _ = Describe("Client Tests", func() {
 
 			m := userlib.DatastoreGetMap()
 			y := []byte("DIE!")
-			for i, v := range m {
+			for i, _ := range m {
 				m[i] = y
 			}
 
