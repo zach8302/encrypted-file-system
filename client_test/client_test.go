@@ -103,10 +103,12 @@ var _ = Describe("Client Tests", func() {
 			var x uuid.UUID
 			var oldName []byte
 			var oldContent []byte
+			var oldFile []byte
 			var seen bool
 			for i, v := range m {
 				if strings.Contains(string(v), "Contents") &&strings.Contains(string(v), "Filename") {
 					x = i
+					oldFile = v
 					oldName = v[strings.Index(string(v), "Filename"):strings.Index(string(v), "Filename")+20]
 					oldContent = v[strings.Index(string(v), "Contents"):strings.Index(string(v), "Contents") + 20]
 					break
@@ -132,19 +134,10 @@ var _ = Describe("Client Tests", func() {
 			err = alice.RevokeAccess(aliceFile, "evan")
 			Expect(err).To(BeNil())
 
-			fmt.Println(string(oldName))
-			fmt.Println(string(oldContent))
 			m = userlib.DatastoreGetMap()
-			fmt.Println(x)
-			fmt.Println(string(oldContent))
-			fmt.Println(string(oldName))
-			for i, v := range m {
-				if !(strings.Contains(string(v), "Salts")) {
-					fmt.Println(i)
-					fmt.Println(string(v))
-				}
+			for _, v := range m {
 				
-				if x != i && (strings.Contains(string(v), string(oldName)) || strings.Contains(string(v), string(oldContent))) {
+				if (strings.Contains(string(v), string(oldName)) || strings.Contains(string(v), string(oldContent))) {
 					seen = true
 					break
 				} else {
@@ -153,8 +146,7 @@ var _ = Describe("Client Tests", func() {
 			}
 			Expect(seen).To(Equal(false))
 
-
-
+			Expect(string(oldFile) == string(m[x])).To(Equal(false))
 
 		})
 
