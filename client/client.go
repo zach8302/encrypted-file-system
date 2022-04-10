@@ -718,6 +718,9 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	} else {
 		var shared SharedFile
 		getShared(&shared, sentinel.ID)
+		if !authenticateFile(userdata, &shared) {
+			return uuid.New(), errors.New(strings.ToTitle("Not allowed to access"))
+		}
 		var filedata File
 		getFile(&filedata, shared.FileID)
 		key, _ := getSharedKey(userdata, &shared)

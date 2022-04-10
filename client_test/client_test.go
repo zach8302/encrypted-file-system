@@ -195,7 +195,9 @@ var _ = Describe("Client Tests", func() {
 			bob, err = client.InitUser("bob", defaultPassword)
 			Expect(err).To(BeNil())
 
-			
+			userlib.DebugMsg("Wrong")
+			aliceLaptop, err = client.GetUser("alice", "Password")
+			Expect(err==nil).To(Equal(false))
 
 			userlib.DebugMsg("Getting second instance of Alice - aliceLaptop")
 			aliceLaptop, err = client.GetUser("alice", defaultPassword)
@@ -264,6 +266,12 @@ var _ = Describe("Client Tests", func() {
 			david, err := client.InitUser("david", defaultPassword)
 			Expect(err).To(BeNil())
 
+			_, err = client.InitUser("mike", defaultPassword)
+			Expect(err).To(BeNil())
+
+			_, err = client.InitUser("sriram", defaultPassword)
+			Expect(err).To(BeNil())
+
 			userlib.DebugMsg("Alice storing file %s with content: %s", aliceFile, contentOne)
 			alice.StoreFile(aliceFile, []byte(contentOne))
 
@@ -304,6 +312,14 @@ var _ = Describe("Client Tests", func() {
 			err = alice.RevokeAccess(aliceFile, "bob")
 			Expect(err).To(BeNil())
 
+			userlib.DebugMsg("Alice tries revoking Sriram's access from %s.", aliceFile)
+			err = alice.RevokeAccess(aliceFile, "sriram")
+			Expect(err==nil).To(Equal(false))
+
+			userlib.DebugMsg("Alice tries revoking fake user's access from %s.", aliceFile)
+			err = alice.RevokeAccess(aliceFile, "zach")
+			Expect(err==nil).To(Equal(false))
+
 			userlib.DebugMsg("Checking that Alice can still load the file.")
 			data, err = alice.LoadFile(aliceFile)
 			Expect(err).To(BeNil())
@@ -319,6 +335,10 @@ var _ = Describe("Client Tests", func() {
 			userlib.DebugMsg("Checking that the revoked users cannot append to the file.")
 			err = bob.AppendToFile(bobFile, []byte(contentTwo))
 			Expect(err).ToNot(BeNil())
+
+			userlib.DebugMsg("Checking that the revoked users cannot invite.")
+			_, err = bob.CreateInvitation(bobFile, "mike")
+			Expect(err==nil).To(Equal(false))
 
 			err = charles.AppendToFile(charlesFile, []byte(contentTwo))
 			Expect(err).ToNot(BeNil())
