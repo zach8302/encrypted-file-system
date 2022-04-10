@@ -1137,6 +1137,56 @@ var _ = Describe("Client Tests", func() {
 	
 		})
 
+		Specify("Append error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			m := userlib.DatastoreGetMap()
+			y := []byte("DIE!")
+			for i, _ := range m {
+				m[i] = y
+			}
+
+			userlib.DebugMsg("Appending file data: %s", contentTwo)
+			err = alice.AppendToFile(aliceFile, []byte(contentTwo))
+			Expect(err==nil).To(Equal(false))
+
+		})
+
+		Specify("Invite Corrup", func() {
+			userlib.DebugMsg("Initializing users Alice (aliceDesktop) and Bob.")
+			aliceDesktop, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			bob, err = client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Getting second instance of Alice - aliceLaptop")
+			aliceLaptop, err = client.GetUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceDesktop storing file %s with content: %s", aliceFile, contentOne)
+			err = aliceDesktop.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			m := userlib.DatastoreGetMap()
+			y := []byte("DIE!")
+			for i, _ := range m {
+				m[i] = y
+			}
+
+			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
+			_, err := aliceLaptop.CreateInvitation(aliceFile, "bob")
+			Expect(err==nil).To(Equal(false))
+
+
+		})
+
 		
 
 
