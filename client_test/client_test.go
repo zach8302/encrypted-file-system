@@ -1207,10 +1207,17 @@ var _ = Describe("Client Tests", func() {
 			err = aliceDesktop.StoreFile(aliceFile, []byte(contentOne))
 			Expect(err).To(BeNil())
 
+			userlib.DebugMsg("aliceLaptop creating fake invite for Bob.")
+			_, err = aliceLaptop.CreateInvitation("fooey", "bob")
+			Expect(err==nil).To(Equal(false))
 
 			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
 			inv, err := aliceLaptop.CreateInvitation(aliceFile, "bob")
 			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceLaptop creating invite for fake.")
+			_, err = aliceLaptop.CreateInvitation(aliceFile, "fake")
+			Expect(err==nil).To(Equal(false))
 
 
 			m := userlib.DatastoreGetMap()
