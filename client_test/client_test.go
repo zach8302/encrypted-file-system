@@ -1148,8 +1148,10 @@ var _ = Describe("Client Tests", func() {
 
 			m := userlib.DatastoreGetMap()
 			y := []byte("DIE!")
-			for i, _ := range m {
-				m[i] = y
+			for i, v := range m {
+				if strings.Contains(string(v), "Next") {
+					m[i] = y
+				}
 			}
 
 			userlib.DebugMsg("Appending file data: %s", contentTwo)
@@ -1158,7 +1160,7 @@ var _ = Describe("Client Tests", func() {
 
 		})
 
-		Specify("Invite Corrup", func() {
+		Specify("Invite Corrupt", func() {
 			userlib.DebugMsg("Initializing users Alice (aliceDesktop) and Bob.")
 			aliceDesktop, err = client.InitUser("alice", defaultPassword)
 			Expect(err).To(BeNil())
@@ -1176,12 +1178,51 @@ var _ = Describe("Client Tests", func() {
 
 			m := userlib.DatastoreGetMap()
 			y := []byte("DIE!")
-			for i, _ := range m {
-				m[i] = y
+			for i, v := range m {
+				if strings.Contains(string(v), "Next") {
+					m[i] = y
+				}
 			}
 
 			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
 			_, err := aliceLaptop.CreateInvitation(aliceFile, "bob")
+			Expect(err==nil).To(Equal(false))
+
+
+		})
+
+		Specify("Invite Corrupt", func() {
+			userlib.DebugMsg("Initializing users Alice (aliceDesktop) and Bob.")
+			aliceDesktop, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			bob, err = client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Getting second instance of Alice - aliceLaptop")
+			aliceLaptop, err = client.GetUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("aliceDesktop storing file %s with content: %s", aliceFile, contentOne)
+			err = aliceDesktop.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+
+			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
+			inv, err := aliceLaptop.CreateInvitation(aliceFile, "bob")
+			Expect(err).To(BeNil())
+
+
+			m := userlib.DatastoreGetMap()
+			y := []byte("DIE!")
+			for i, v := range m {
+				if strings.Contains(string(v), "OwnerReceiver") {
+					m[i] = y
+				}
+			}
+
+			userlib.DebugMsg("Bob accepting invite from Alice under filename %s.", bobFile)
+			err = bob.AcceptInvitation("alice", inv, bobFile)
 			Expect(err==nil).To(Equal(false))
 
 

@@ -259,18 +259,19 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	return &userdata, nil
 }
 
-func unpackUserValues(userdata *User, password string) {
+func unpackUserValues(userdata *User, password string) error {
 	names := [11]string  {"file", "fileMac", "treeKey", "RSAInviteMac", "RSAFile", "RSAMac", "RSAFilename", "RSATreeNode", "userMAC", "share", "DSA"}
 	for _, val := range names {
 		salt := userdata.Salts[val]
 		key := userlib.Argon2Key([]byte(password), salt, uint32(16))
 		enc := userdata.EncKeys[val]
 		if enc == nil {
-			//error
+			return errors.New(strings.ToTitle("Corrupt Data"))
 		}
 		store := userlib.SymDec(key, enc)
 		userdata.Stored[val] = store
 	}
+	return nil
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
@@ -701,6 +702,10 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		var filedata File
 		getFile(&filedata, sentinel.ID)
 		key := userdata.Stored["file"]
+		cipher := filedata.OwnerKey
+		if key == nil || cipher ==nil {
+			return uuid.New(), errors.New(strings.ToTitle("Corrupt Data"))
+		}
 		shared := userlib.SymDec(key, filedata.OwnerKey)
 
 		var tree TreeNode
