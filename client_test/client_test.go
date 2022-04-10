@@ -1148,10 +1148,8 @@ var _ = Describe("Client Tests", func() {
 
 			m := userlib.DatastoreGetMap()
 			y := []byte("DIE!")
-			for i, v := range m {
-				if strings.Contains(string(v), "Next") {
-					m[i] = y
-				}
+			for i, _ := range m {
+				m[i] = y
 			}
 
 			userlib.DebugMsg("Appending file data: %s", contentTwo)
@@ -1178,10 +1176,8 @@ var _ = Describe("Client Tests", func() {
 
 			m := userlib.DatastoreGetMap()
 			y := []byte("DIE!")
-			for i, v := range m {
-				if strings.Contains(string(v), "Next") {
-					m[i] = y
-				}
+			for i, _ := range m {
+				m[i] = y
 			}
 
 			userlib.DebugMsg("aliceLaptop creating invite for Bob.")
@@ -1223,9 +1219,7 @@ var _ = Describe("Client Tests", func() {
 			m := userlib.DatastoreGetMap()
 			y := []byte("DIE!")
 			for i, v := range m {
-				if strings.Contains(string(v), "OwnerReceiver") {
-					m[i] = y
-				}
+				m[i] = y
 			}
 
 			userlib.DebugMsg("Bob accepting invite from Alice under filename %s.", bobFile)
