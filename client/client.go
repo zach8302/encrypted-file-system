@@ -56,6 +56,7 @@ type TreeNode struct {
 type File struct {
 	Next uuid.UUID
 	Last uuid.UUID
+	Prev uuid.UUID
 	OwnerKey []byte
 	MacKey []byte
 	NameKey []byte

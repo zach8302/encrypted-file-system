@@ -44,6 +44,26 @@ const contentThree = "cryptocurrency!"
 // a tree-like structure.
 // ================================================
 
+func mapDif(m1 map[uuid.UUID][]byte, m2 map[uuid.UUID][]byte) (uuid.UUID) {
+	for i, _ := range m2 {
+		if _, ok := m1[i]; !ok {
+			return i
+		}
+	}
+	return uuid.New()
+}
+
+func saveMap() (map[userlib.UUID][]byte) {
+	m := userlib.DatastoreGetMap()
+	saved := make(map[userlib.UUID][]byte)
+
+	for key, val := range m{
+		saved[key] = val
+	}
+
+	return saved
+}
+
 var _ = Describe("Client Tests", func() {
 
 	// A few user declarations that may be used for testing. Remember to initialize these before you
@@ -75,6 +95,8 @@ var _ = Describe("Client Tests", func() {
 	// graceFile := "graceFile.txt"
 	// horaceFile := "horaceFile.txt"
 	// iraFile := "iraFile.txt"
+
+	
 
 	BeforeEach(func() {
 		// This runs before each test within this Describe block (including nested tests).
@@ -1227,6 +1249,64 @@ var _ = Describe("Client Tests", func() {
 			Expect(err==nil).To(Equal(false))
 
 
+		})
+
+		Specify("Test overwrite file", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Loading file...")
+			data, err := alice.LoadFile(aliceFile)
+			Expect(err).To(BeNil())
+			Expect(data).To(Equal([]byte(contentOne)))
+
+			userlib.DebugMsg("Storing file data: %s", "butt")
+			err = alice.StoreFile(aliceFile, []byte("butt"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Loading file...")
+			data, err = alice.LoadFile(aliceFile)
+			Expect(err).To(BeNil())
+			Expect(data).To(Equal([]byte("butt")))
+		})
+
+		
+
+		Specify("Append skip", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			m1 := saveMap()
+
+			userlib.DebugMsg("Appending file data: %s", contentTwo)
+			err = alice.AppendToFile(aliceFile, []byte(contentTwo))
+			Expect(err).To(BeNil())
+
+			m2 := saveMap()
+			x1 := mapDif(m1, m2)
+
+			userlib.DebugMsg("Appending file data: %s", contentThree)
+			err = alice.AppendToFile(aliceFile, []byte(contentThree))
+			Expect(err).To(BeNil())
+
+			m3 := userlib.DatastoreGetMap()
+			x2 := mapDif(m2, m3)
+
+			m3[x1] = m3[x2]
+
+			userlib.DebugMsg("Loading file...")
+			_, err := alice.LoadFile(aliceFile)
+			Expect(err==nil).To(Equal(false))
 		})
 
 		
