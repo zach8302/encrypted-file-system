@@ -107,8 +107,41 @@ var _ = Describe("Client Tests", func() {
 	})
 
 	Describe("Basic Tests", func() {
+		Specify("Append skip", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			m1 := saveMap()
+
+			userlib.DebugMsg("Appending file data: %s", contentTwo)
+			err = alice.AppendToFile(aliceFile, []byte(contentTwo))
+			Expect(err).To(BeNil())
+
+			m2 := saveMap()
+			x1 := mapDif(m1, m2)
+
+			userlib.DebugMsg("Appending file data: %s", contentThree)
+			err = alice.AppendToFile(aliceFile, []byte(contentThree))
+			Expect(err).To(BeNil())
+
+			m3 := userlib.DatastoreGetMap()
+			x2 := mapDif(m2, m3)
+
+			m3[x1] = m3[x2]
+
+			userlib.DebugMsg("Loading file...")
+			_, err := alice.LoadFile(aliceFile)
+			Expect(err==nil).To(Equal(false))
+		})
 
 		Specify("File swap", func() {
+
+			
 			userlib.DebugMsg("Initializing user Alice.")
 			alice, err = client.InitUser("alice", defaultPassword)
 			Expect(err).To(BeNil())
@@ -1277,37 +1310,7 @@ var _ = Describe("Client Tests", func() {
 
 		
 
-		Specify("Append skip", func() {
-			userlib.DebugMsg("Initializing user Alice.")
-			alice, err = client.InitUser("alice", defaultPassword)
-			Expect(err).To(BeNil())
-
-			userlib.DebugMsg("Storing file data: %s", contentOne)
-			err = alice.StoreFile(aliceFile, []byte(contentOne))
-			Expect(err).To(BeNil())
-
-			m1 := saveMap()
-
-			userlib.DebugMsg("Appending file data: %s", contentTwo)
-			err = alice.AppendToFile(aliceFile, []byte(contentTwo))
-			Expect(err).To(BeNil())
-
-			m2 := saveMap()
-			x1 := mapDif(m1, m2)
-
-			userlib.DebugMsg("Appending file data: %s", contentThree)
-			err = alice.AppendToFile(aliceFile, []byte(contentThree))
-			Expect(err).To(BeNil())
-
-			m3 := userlib.DatastoreGetMap()
-			x2 := mapDif(m2, m3)
-
-			m3[x1] = m3[x2]
-
-			userlib.DebugMsg("Loading file...")
-			_, err := alice.LoadFile(aliceFile)
-			Expect(err==nil).To(Equal(false))
-		})
+		
 
 		
 

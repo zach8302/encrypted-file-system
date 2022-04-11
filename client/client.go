@@ -535,6 +535,7 @@ func ownerAppend(userdata *User, filename string, content []byte, id uuid.UUID, 
 	filedata.Last = lastUUID
 	
 	appendFile.ID = lastUUID
+	appendFile.Prev = lastID
 	serial, _ := json.Marshal(appendFile)
 	userlib.DatastoreSet(lastUUID, serial)
 
@@ -652,8 +653,12 @@ func decryptFile(userdata *User, filename string, file uuid.UUID, shared bool, p
 	}
 	_, _, mac := getFileKeys(&filedata, ki)
 	validateFile(mac, filedata.Filename, filedata.Signature, filedata.Owner, filedata.Contents, filedata.MAC, true)
+	prev := filedata.Prev
 	for file != empty {
 		getFile(&filedata, file)
+		if filedata.Prev != prev {
+			return nil, errors.New(strings.ToTitle("Integrity Error"))
+		}
 		var key []byte
 		if shared {
 			key = pos
@@ -671,6 +676,7 @@ func decryptFile(userdata *User, filename string, file uuid.UUID, shared bool, p
 		//decrypt the contents
 		content += string(userlib.SymDec(fileKey, filedata.Contents))
 
+		prev = file
 		file = filedata.Next
 	}
 	return []byte(content), nil
