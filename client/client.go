@@ -387,7 +387,8 @@ func createFile(userdata *User, filedata *File, filename string, content []byte,
 	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
 	filedata.Contents = enc
 
-	enc = userlib.SymEnc(name, userlib.RandomBytes(16), ([]byte)(filename))
+	hashName := userlib.Hash([]byte(filename))
+	enc = userlib.SymEnc(name, userlib.RandomBytes(16), hashName)
 	filedata.Filename = enc
 	//calculate the mac
 	fileValues := string(filedata.Filename) + string(filedata.Contents)
@@ -415,14 +416,15 @@ func updateFile(userdata *User, filedata *File, filename string, content []byte,
 	}
 	fileKey, nameKey, macKey := getFileKeys(filedata, owner)
 
-	name := userlib.SymDec(nameKey, filedata.Filename)
+	if !shared {
+		hashName := userlib.Hash([]byte(filename))
+		encName := userlib.SymEnc(nameKey, userlib.RandomBytes(16), hashName)
+		filedata.Filename = encName
+	}
 
 	enc := userlib.SymEnc(fileKey, userlib.RandomBytes(16), content)
 	filedata.Contents = enc
 
-
-	enc = userlib.SymEnc(nameKey, userlib.RandomBytes(16), ([]byte)(name))
-	filedata.Filename = enc
 	//calculate the mac
 	fileValues := string(filedata.Filename) + string(filedata.Contents)
 	
@@ -648,7 +650,9 @@ func decryptFile(userdata *User, filename string, file uuid.UUID, shared bool, p
 	}
 	nameKey := userlib.SymDec(ki, filedata.NameKey)
 	name := userlib.SymDec(nameKey, filedata.Filename)
-	if !shared && string(name) != filename {
+	hashName := userlib.Hash([]byte(filename))
+
+	if !shared && string(name) != string(hashName) {
 		return nil, errors.New(strings.ToTitle("Data Integrity error"))
 	}
 	_, _, mac := getFileKeys(&filedata, ki)
